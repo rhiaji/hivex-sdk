@@ -1,0 +1,14 @@
+{
+  "//": "Emit build for publishing the extracted SDK: JS + declarations into ./dist.",
+  "extends": "./tsconfig.json",
+  "include": ["**/*.ts"],
+  "exclude": ["**/*.test.ts", "dist"],
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": ".",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true
+  }
+}
