@@ -2,7 +2,9 @@ import { defineConfig } from "tsup";
 
 // Resolved against this file so the build works from the repo root or from
 // `package-manager/`.
-const here = new URL(".", import.meta.url).pathname.replace(/\/$/, "");
+const here = decodeURIComponent(new URL(".", import.meta.url).pathname)
+  .replace(/^\/([A-Za-z]:)/, "$1")
+  .replace(/[\\/]$/, "");
 
 /**
  * The package ships one bundled ESM entry plus one bundled declaration file.
