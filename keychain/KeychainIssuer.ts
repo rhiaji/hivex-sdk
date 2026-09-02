@@ -10,8 +10,8 @@ import type { KeychainClient } from "./KeychainClient";
 import type { KeychainResult } from "./types";
 import type {
   NftBurnInput,
-  NftMintInput,
-  NftMintMultipleInput,
+  NftIssueInput,
+  NftIssueMultipleInput,
   NftTransferInput,
 } from "../issuer/nft/types";
 import type { TokenActionInput, TokenBurnActionInput } from "../engine/TokenActionBuilder";
@@ -47,7 +47,7 @@ type EngineInput<T> = Omit<T, "from" | "mode" | "id">;
 /**
  * Direct Hive Engine broadcasting through Hive Keychain.
  *
- * Completely independent of the configuration, alias, environment and signer
+ * Completely independent of the configuration, alias, environment and signing
  * systems: the browser account signs itself and no private key ever exists in
  * SDK memory. It reuses the same pure engine action builders as the backend
  * flow, so both paths emit byte-identical contract payloads.
@@ -76,12 +76,12 @@ export class KeychainEngineIssuer {
   }
 }
 
-/** `hive.keychain.issuer.token` — Hive Engine `tokens` contract via Keychain. */
+/** `hive.keychainIssuer.token` — Hive Engine `tokens` contract via Keychain. */
 export class KeychainTokenIssuer extends KeychainEngineIssuer {
-  /** Pure builder, reusable for previews and dry runs. */
+  /** Pure builder, reusable for payload previews. */
   public readonly actions = new TokenActionBuilder();
 
-  buildMint(input: TokenActionInput): HiveEngineContractAction {
+  buildIssue(input: TokenActionInput): HiveEngineContractAction {
     return this.actions.buildIssue(input);
   }
 
@@ -93,10 +93,10 @@ export class KeychainTokenIssuer extends KeychainEngineIssuer {
     return this.actions.buildBurn(input);
   }
 
-  async mint(
+  async issue(
     input: TokenActionInput & KeychainIssuerOptions,
   ): Promise<KeychainResult> {
-    return this.broadcast(this.buildMint(input), input);
+    return this.broadcast(this.buildIssue(input), input);
   }
 
   async transfer(
@@ -116,18 +116,18 @@ export class KeychainTokenIssuer extends KeychainEngineIssuer {
   }
 }
 
-/** `hive.keychain.issuer.nft` — Hive Engine `nft` contract via Keychain. */
+/** `hive.keychainIssuer.nft` — Hive Engine `nft` contract via Keychain. */
 export class KeychainNftIssuer extends KeychainEngineIssuer {
   public readonly actions = new NftActionBuilder();
 
-  buildMint<TProperties extends Record<string, unknown> = Record<string, unknown>>(
-    input: EngineInput<NftMintInput<TProperties>>,
+  buildIssue<TProperties extends Record<string, unknown> = Record<string, unknown>>(
+    input: EngineInput<NftIssueInput<TProperties>>,
   ): HiveEngineContractAction {
     return this.actions.buildIssue<TProperties>(input);
   }
 
-  buildMintMultiple<TProperties extends Record<string, unknown> = Record<string, unknown>>(
-    input: EngineInput<NftMintMultipleInput<TProperties>>,
+  buildIssueMultiple<TProperties extends Record<string, unknown> = Record<string, unknown>>(
+    input: EngineInput<NftIssueMultipleInput<TProperties>>,
   ): HiveEngineContractAction {
     return this.actions.buildIssueMultiple<TProperties>(input);
   }
@@ -141,16 +141,16 @@ export class KeychainNftIssuer extends KeychainEngineIssuer {
     return this.actions.buildBurn(input);
   }
 
-  async mint<TProperties extends Record<string, unknown> = Record<string, unknown>>(
-    input: EngineInput<NftMintInput<TProperties>> & KeychainIssuerOptions,
+  async issue<TProperties extends Record<string, unknown> = Record<string, unknown>>(
+    input: EngineInput<NftIssueInput<TProperties>> & KeychainIssuerOptions,
   ): Promise<KeychainResult> {
-    return this.broadcast(this.buildMint<TProperties>(input), input);
+    return this.broadcast(this.buildIssue<TProperties>(input), input);
   }
 
-  async mintMultiple<TProperties extends Record<string, unknown> = Record<string, unknown>>(
-    input: EngineInput<NftMintMultipleInput<TProperties>> & KeychainIssuerOptions,
+  async issueMultiple<TProperties extends Record<string, unknown> = Record<string, unknown>>(
+    input: EngineInput<NftIssueMultipleInput<TProperties>> & KeychainIssuerOptions,
   ): Promise<KeychainResult> {
-    return this.broadcast(this.buildMintMultiple<TProperties>(input), input);
+    return this.broadcast(this.buildIssueMultiple<TProperties>(input), input);
   }
 
   async transfer(
@@ -170,7 +170,7 @@ export class KeychainNftIssuer extends KeychainEngineIssuer {
   }
 }
 
-/** Grouped Keychain issuers: `hive.keychain.issuer.token` / `.nft`. */
+/** Grouped Keychain issuers: `hive.keychainIssuer.token` / `.nft`. */
 export class KeychainIssuer {
   public readonly token: KeychainTokenIssuer;
   public readonly nft: KeychainNftIssuer;

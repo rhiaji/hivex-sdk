@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { NFT_ACTIONS, NFT_CONTRACT } from "../../engine/index";
-import { NftTransactionBuilder, countNftInstances } from "./NftTransactionBuilder";
+import { NftActionBuilder, countNftInstances } from "../../engine/NftActionBuilder";
 import { NftSymbolError, NftTransferLimitError, NftValidationError } from "./errors";
 
-const builder = new NftTransactionBuilder();
+const builder = new NftActionBuilder();
 
-describe("NftTransactionBuilder.buildIssue", () => {
+describe("NftActionBuilder.buildIssue", () => {
   it("builds a Hive Engine nft.issue contract action", () => {
     const action = builder.buildIssue({
       symbol: "COLLECTION",
@@ -63,7 +63,7 @@ describe("NftTransactionBuilder.buildIssue", () => {
   });
 });
 
-describe("NftTransactionBuilder.buildIssueMultiple", () => {
+describe("NftActionBuilder.buildIssueMultiple", () => {
   it("builds one payload per instance", () => {
     const action = builder.buildIssueMultiple({
       instances: [
@@ -93,7 +93,7 @@ describe("NftTransactionBuilder.buildIssueMultiple", () => {
   });
 });
 
-describe("NftTransactionBuilder.buildTransfer", () => {
+describe("NftActionBuilder.buildTransfer", () => {
   it("builds a nft.transfer contract action", () => {
     const action = builder.buildTransfer({
       account: "alice",
@@ -143,14 +143,14 @@ describe("countNftInstances", () => {
 
 describe("NftActionBuilder burn", () => {
   it("burns to null by default", () => {
-    const action = new NftTransactionBuilder().buildBurn({ symbol: "CARD", id: "1" });
+    const action = new NftActionBuilder().buildBurn({ symbol: "CARD", id: "1" });
     expect(action.contractAction).toBe("transfer");
     expect(action.contractPayload["to"]).toBe("null");
     expect(action.contractPayload["nfts"]).toEqual([{ symbol: "CARD", ids: ["1"] }]);
   });
 
   it("accepts several ids and a custom destination", () => {
-    const action = new NftTransactionBuilder().buildBurn({
+    const action = new NftActionBuilder().buildBurn({
       symbol: "CARD",
       id: ["1", "2"],
       account: "graveyard",
@@ -160,6 +160,6 @@ describe("NftActionBuilder burn", () => {
   });
 
   it("rejects an empty id list", () => {
-    expect(() => new NftTransactionBuilder().buildBurn({ symbol: "CARD", id: [] })).toThrow();
+    expect(() => new NftActionBuilder().buildBurn({ symbol: "CARD", id: [] })).toThrow();
   });
 });

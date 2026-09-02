@@ -10,7 +10,7 @@ export interface HiveClientConfig {
   beaconUrl?: string;
 }
 
-/** Hive authority used to sign a custom_json operation. */
+/** Hive authority required by a custom_json operation. */
 export type HiveAuthority = "posting" | "active";
 
 /**
@@ -40,12 +40,12 @@ export interface CustomJsonOperationValue {
 export interface CustomJsonEvent<T = Record<string, unknown>> {
   /** Deterministic id: `${blockNumber}-${transactionIndex}-${operationIndex}` */
   eventId: string;
-  transactionId: string;
+  transactionId: string | null;
   blockNumber: number;
   blockTimestamp: string;
   transactionIndex: number;
   operationIndex: number;
-  /** Derived signer when exactly one authority is present. */
+  /** Derived authority account when exactly one authority is present. */
   account: string | null;
   id: string;
   action: string;
@@ -65,18 +65,12 @@ export type HiveSdkErrorCode =
   | "KEYCHAIN_ERROR"
   | "PARSE_ERROR"
   | "NOT_FOUND"
-  | "CONFIG_NOT_FOUND"
-  | "CONFIG_EXISTS"
   | "ACCOUNT_ALIAS_NOT_FOUND"
   | "ACCOUNT_CONFIG_INVALID"
   | "CONFIG_INVALID"
   | "ACCOUNT_RESOLUTION_ERROR"
   | "ENV_VAR_MISSING"
   | "SIGNING_KEY_MISSING"
-  | "KEY_ID_MISSING"
-  | "KEY_NOT_FOUND"
-  | "KEY_PROVIDER_ERROR"
-  | "SIGNER_NOT_CONFIGURED"
   | "SIGNING_ERROR"
   | "BROADCAST_ERROR"
   | "NFT_VALIDATION_ERROR"

@@ -1,7 +1,7 @@
+import type { TransactionReader } from "../reader/TransactionReader";
 import { HiveSdkError } from "../types/index";
 import { quantitiesEqual } from "./amount";
 import type { EnginePaymentValidator } from "./engine/EnginePaymentValidator";
-import type { PaymentParser } from "./PaymentParser";
 import type {
   ParsedPayment,
   PaymentExpectation,
@@ -10,18 +10,34 @@ import type {
 } from "./types";
 
 /**
- * Verifies that a payment happened, executed and matches expectations.
+ * THE payment validator.
+ *
+ * Verifies that a payment happened, executed and matches expectations. It
+ * reuses the canonical transaction reader — it never fetches or parses a
+ * transaction itself.
  *
  * Native transfers are final once included in a block. Layer 2 transfers are
- * only successful when the Hive Engine execution logs say so.
+ * only successful when the Hive Engine execution logs say so; an unresolved
+ * sidechain stays `pending`, never a false success and never a false failure.
  */
 export class PaymentValidator {
-  private readonly parser: PaymentParser;
+  private readonly reader: TransactionReader;
   private readonly engineValidator: EnginePaymentValidator;
 
-  constructor(parser: PaymentParser, engineValidator: EnginePaymentValidator) {
-    this.parser = parser;
+  constructor(reader: TransactionReader, engineValidator: EnginePaymentValidator) {
+    this.reader = reader;
     this.engineValidator = engineValidator;
+  }
+
+  /** Every payment carried by a transaction, without execution checks. */
+  async parse<T = unknown>(transactionId: string): Promise<ParsedPayment<T>[]> {
+    if (typeof transactionId !== "string" || transactionId.trim() === "") {
+      throw new HiveSdkError("VALIDATION_ERROR", `"transactionId" must be a non-empty string`);
+    }
+    const result = await this.reader.read<T extends Record<string, unknown> ? T : never>({
+      transactionId,
+    });
+    return result.payments as unknown as ParsedPayment<T>[];
   }
 
   async validate<T = unknown>(
@@ -33,7 +49,7 @@ export class PaymentValidator {
 
     let payments: ParsedPayment<T>[] = [];
     try {
-      payments = await this.parser.parseTransaction<T>(input.transactionId);
+      payments = await this.parse<T>(input.transactionId);
     } catch (error) {
       if (error instanceof HiveSdkError && error.code === "NOT_FOUND") {
         return this.notFound<T>(input);
@@ -61,7 +77,15 @@ export class PaymentValidator {
   private async resolveExecution<T>(payment: ParsedPayment<T>): Promise<ParsedPayment<T>> {
     if (payment.network !== "engine" || !payment.transactionId) return payment;
 
-    const execution = await this.engineValidator.verify(payment.transactionId);
+    // Matching is as precise as the sidechain data allows, so another transfer
+    // in the same transaction can never be credited to this one.
+    const execution = await this.engineValidator.verify(payment.transactionId, {
+      from: payment.transfer.from,
+      to: payment.transfer.account,
+      symbol: payment.transfer.symbol,
+      quantity: payment.transfer.quantity,
+    });
+
     return {
       ...payment,
       success: execution.success,
@@ -100,17 +124,9 @@ export class PaymentValidator {
     if (expected.action !== undefined && trigger?.action !== expected.action) {
       return trigger
         ? `Expected action "${expected.action}" but the trigger carried "${trigger.action}"`
-        : `Expected action "${expected.action}" but the transfer carried no trigger`;
+        : `Expected action "${expected.action}" but the payment carried no standardized trigger`;
     }
     return null;
-  }
-
-  private unsupported<T>(input: PaymentValidateInput): PaymentValidationResult<T> {
-    return {
-      ...this.notFound<T>(input),
-      status: "invalid",
-      error: `Transaction ${input.transactionId} contains no supported payment`,
-    };
   }
 
   private notFound<T>(input: PaymentValidateInput): PaymentValidationResult<T> {
@@ -119,9 +135,21 @@ export class PaymentValidator {
       transactionId: input.transactionId,
       success: false,
       status: "not_found",
-      transfer: { from: "", account: "", symbol: "", quantity: "0", memo: null },
+      transfer: { from: "", account: "", symbol: "", quantity: "0" },
       trigger: null,
-      error: `No payment was found for transaction ${input.transactionId}`,
+      error: `Transaction ${input.transactionId} was not found`,
+    };
+  }
+
+  private unsupported<T>(input: PaymentValidateInput): PaymentValidationResult<T> {
+    return {
+      network: "hive",
+      transactionId: input.transactionId,
+      success: false,
+      status: "invalid",
+      transfer: { from: "", account: "", symbol: "", quantity: "0" },
+      trigger: null,
+      error: `Transaction ${input.transactionId} carries no supported payment operation`,
     };
   }
 }

@@ -3,17 +3,19 @@ import { CustomJsonBuilder } from "../../transaction/CustomJsonBuilder";
 import { HiveSdkError } from "../../types/index";
 import { createAccountReference } from "../../configs/AccountReference";
 import type { IssuerContext } from "../IssuerDispatcher";
+import { HIVE_ENGINE_CUSTOM_JSON_ID, TokenActionBuilder } from "../../engine/index";
 import { TokenIssuer } from "./TokenIssuer";
 
-const ref = (alias: string) => createAccountReference("default", alias, {});
+const TEST_WIF = "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ";
+
+const ref = (alias: string) => createAccountReference(alias, {});
 
 function makeContext(overrides: Partial<IssuerContext> = {}): IssuerContext {
   return {
     rpc: { call: vi.fn() } as unknown as IssuerContext["rpc"],
     keychain: {} as IssuerContext["keychain"],
-    signer: { sign: vi.fn() } as unknown as IssuerContext["signer"],
-    configName: "default",
     builder: new CustomJsonBuilder(),
+    resolveSigningAccount: (alias: string) => ({ alias, account: "treasury-account", key: TEST_WIF }),
     resolveAccount: (alias: string) => {
       if (alias !== "treasury") {
         throw new HiveSdkError("ACCOUNT_ALIAS_NOT_FOUND", `Unknown alias "${alias}"`);
@@ -28,82 +30,90 @@ function makeContext(overrides: Partial<IssuerContext> = {}): IssuerContext {
 const base = { from: ref("treasury"), symbol: "TOKEN", account: "alice", quantity: "100.000" };
 
 describe("TokenIssuer offline builders", () => {
-  it("builds a { action, metadata } operation from the alias", () => {
-    const preview = new TokenIssuer(makeContext()).buildMint(base);
+  it("builds a tokens.issue contract action from the alias", () => {
+    const preview = new TokenIssuer(makeContext()).buildIssue(base);
 
     expect(preview.alias).toBe("treasury");
     expect(preview.account).toBe("treasury-account");
     expect(preview.destination).toBe("alice");
-    expect(preview.id).toBe("my-app");
+    expect(preview.id).toBe(HIVE_ENGINE_CUSTOM_JSON_ID);
     expect(JSON.parse(preview.json)).toEqual({
-      action: "token.mint",
-      metadata: { symbol: "TOKEN", account: "alice", quantity: "100.000" },
+      contractName: "tokens",
+      contractAction: "issue",
+      contractPayload: { symbol: "TOKEN", to: "alice", quantity: "100.000" },
     });
 
     const operation = preview.operation as [string, { required_auths: string[] }];
     expect(operation[1].required_auths).toEqual(["treasury-account"]);
   });
 
-  it("uses the token.transfer action and burns to null by default", () => {
+  it("uses tokens.transfer and burns to null by default", () => {
     const issuer = new TokenIssuer(makeContext());
-    expect(JSON.parse(issuer.buildTransfer(base).json).action).toBe("token.transfer");
+    expect(JSON.parse(issuer.buildTransfer(base).json).contractAction).toBe("transfer");
 
     const burn = JSON.parse(
       issuer.buildBurn({ from: ref("treasury"), symbol: "TOKEN", quantity: "5" }).json,
     );
-    expect(burn.action).toBe("token.transfer");
-    expect(burn.metadata.account).toBe("null");
+    expect(burn.contractAction).toBe("transfer");
+    expect(burn.contractPayload.to).toBe("null");
   });
 
   it("supports a custom burn destination", () => {
     const issuer = new TokenIssuer(makeContext());
-    const burn = JSON.parse(
-      issuer.buildBurn({ from: ref("treasury"), symbol: "TOKEN", quantity: "5", account: "graveyard" })
-        .json,
-    );
-    expect(burn.metadata.account).toBe("graveyard");
+    const preview = issuer.buildBurn({
+      from: ref("treasury"),
+      symbol: "TOKEN",
+      quantity: "5",
+      account: "graveyard",
+    });
+    expect(JSON.parse(preview.json).contractPayload.to).toBe("graveyard");
+    expect(preview.destination).toBe("graveyard");
   });
 
   it("never signs or broadcasts while previewing", () => {
-    const sign = vi.fn();
     const call = vi.fn();
     const issuer = new TokenIssuer(
-      makeContext({
-        signer: { sign } as unknown as IssuerContext["signer"],
-        rpc: { call } as unknown as IssuerContext["rpc"],
-      }),
+      makeContext({ rpc: { call } as unknown as IssuerContext["rpc"] }),
     );
-    issuer.buildMint(base);
-    expect(sign).not.toHaveBeenCalled();
+    issuer.buildIssue(base);
     expect(call).not.toHaveBeenCalled();
   });
 
-  it("rejects float quantities and bad symbols", () => {
+  it("validates symbol, account and quantity through the shared validators", () => {
     const issuer = new TokenIssuer(makeContext());
-    expect(() => issuer.buildMint({ ...base, quantity: 100 as unknown as string })).toThrow(
-      HiveSdkError,
+    expect(() => issuer.buildIssue({ ...base, symbol: "token" })).toThrow(HiveSdkError);
+    expect(() => issuer.buildIssue({ ...base, account: "" })).toThrow(HiveSdkError);
+    expect(() => issuer.buildIssue({ ...base, quantity: 100 as unknown as string })).toThrow(
+      /decimal string/,
     );
-    expect(() => issuer.buildMint({ ...base, symbol: "token" })).toThrow(HiveSdkError);
-  });
-
-  it("requires an application id when none is configured", () => {
-    const issuer = new TokenIssuer(makeContext({ applicationId: "" }));
-    expect(() => issuer.buildMint(base)).toThrow(/application id/i);
+    expect(() => issuer.buildIssue({ ...base, quantity: "0" })).toThrow(/greater than zero/);
+    expect(() => issuer.buildIssue({ ...base, quantity: "-5" })).toThrow(HiveSdkError);
+    expect(() => issuer.buildIssue({ ...base, quantity: "10.5e3" })).toThrow(HiveSdkError);
+    expect(() => issuer.buildTransfer({ ...base, quantity: "0.001" })).not.toThrow();
   });
 
   it("surfaces unknown aliases", () => {
     const issuer = new TokenIssuer(makeContext());
-    expect(() => issuer.buildMint({ ...base, from: ref("nope") })).toThrow(/Unknown alias/);
+    expect(() => issuer.buildIssue({ ...base, from: ref("nope") })).toThrow(/Unknown alias/);
+  });
+
+  it("emits the same protocol payload as the Keychain path", () => {
+    const backend = JSON.parse(new TokenIssuer(makeContext()).buildTransfer(base).json);
+    const keychain = new TokenActionBuilder().buildTransfer({
+      symbol: base.symbol,
+      account: base.account,
+      quantity: base.quantity,
+    });
+    expect(backend).toEqual(keychain);
   });
 });
 
 describe("TokenIssuer signing path", () => {
   it("resolves the key lazily, signs once and broadcasts", async () => {
-    const sign = vi.fn().mockResolvedValue({ transaction: { signatures: ["sig"] } });
     const resolveSigningAccount = vi.fn((alias: string) => ({
       alias,
       account: "treasury-account",
-      key: "5Jprivatekey",
+      key: TEST_WIF,
     }));
     const call = vi.fn().mockImplementation((method: string) => {
       if (method === "condenser_api.get_dynamic_global_properties") {
@@ -118,19 +128,22 @@ describe("TokenIssuer signing path", () => {
 
     const issuer = new TokenIssuer(
       makeContext({
-        signer: { sign } as unknown as IssuerContext["signer"],
         rpc: { call } as unknown as IssuerContext["rpc"],
         resolveSigningAccount,
       }),
     );
 
     // Building a preview must not resolve any key.
-    issuer.buildMint(base);
+    issuer.buildIssue(base);
     expect(resolveSigningAccount).not.toHaveBeenCalled();
 
-    const result = await issuer.mint(base);
+    const result = await issuer.issue(base);
     expect(resolveSigningAccount).toHaveBeenCalledTimes(1);
-    expect(sign).toHaveBeenCalledTimes(1);
+    const broadcast = call.mock.calls.find(
+      ([method]) => method === "condenser_api.broadcast_transaction_synchronous",
+    );
+    const [signed] = (broadcast?.[1] ?? []) as [{ signatures: string[] }];
+    expect(signed.signatures).toHaveLength(1);
     expect(result.transactionId).toBe("tx999");
   });
 });

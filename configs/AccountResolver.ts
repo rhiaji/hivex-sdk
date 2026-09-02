@@ -85,16 +85,10 @@ export function validateAccountConfig(alias: string, entry: unknown): void {
  * actually used, and resolved private keys are never cached or stored.
  */
 export class AccountResolver {
-  private readonly configName: string;
   private readonly accounts: Record<string, HiveAccountConfig>;
   private readonly environment: EnvironmentResolver;
 
-  constructor(
-    configName: string,
-    accounts: Record<string, HiveAccountConfig>,
-    environment: EnvironmentResolver,
-  ) {
-    this.configName = configName;
+  constructor(accounts: Record<string, HiveAccountConfig>, environment: EnvironmentResolver) {
     this.accounts = accounts;
     this.environment = environment;
   }
@@ -117,7 +111,7 @@ export class AccountResolver {
   private entry(alias: string): HiveAccountConfig {
     assertNonEmptyString(alias, "alias");
     const entry = this.accounts[alias];
-    if (!entry) throw new HiveAccountNotFoundError(alias, this.configName);
+    if (!entry) throw new HiveAccountNotFoundError(alias);
     validateAccountConfig(alias, entry);
     return entry;
   }
@@ -131,14 +125,13 @@ export class AccountResolver {
         ? entry.account.trim()
         : requireEnvValue(this.environment, entry.accountEnv as string, {
             alias,
-            config: this.configName,
             purpose: "account",
           }).trim();
 
     if (account === "") {
       throw new HiveAccountResolutionError(
         `Account alias "${alias}" resolved to an empty account name.`,
-        { alias, config: this.configName },
+        { alias },
       );
     }
 
@@ -158,7 +151,7 @@ export class AccountResolver {
     const entry = this.entry(alias);
 
     if (entry.key === undefined && entry.keyEnv === undefined) {
-      throw new HiveSigningKeyMissingError(alias, this.configName);
+      throw new HiveSigningKeyMissingError(alias);
     }
 
     const key =
@@ -166,14 +159,13 @@ export class AccountResolver {
         ? entry.key
         : requireEnvValue(this.environment, entry.keyEnv as string, {
             alias,
-            config: this.configName,
             purpose: "key",
           });
 
     if (typeof key !== "string" || key.trim() === "") {
       throw new HiveAccountResolutionError(
         `Invalid private key for configured signing account "${alias}".`,
-        { alias, config: this.configName },
+        { alias },
       );
     }
 

@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { CustomJsonParser } from "../../parser/CustomJsonParser";
 import type { EnginePaymentValidator } from "../../payments/engine/EnginePaymentValidator";
 import { HIVE_ENGINE_CUSTOM_JSON_ID } from "../../engine/constants";
-import type { NumberedBlock } from "../../rpc/types";
 import type { BlockStreamer } from "../../stream/BlockStreamer";
+import { normalizeBlock, type NormalizedBlock } from "../../stream/normalizeBlock";
 import { StreamEngine } from "./StreamEngine";
 import type { CustomJsonStreamEvent, PaymentStreamEvent } from "./types";
 
@@ -51,17 +51,16 @@ function appCustomJson(action: string) {
   ];
 }
 
-function block(blockNumber: number, operations: unknown[][]): NumberedBlock {
-  return {
-    block_num: blockNumber,
+function block(blockNumber: number, operations: unknown[][]): NormalizedBlock {
+  return normalizeBlock(blockNumber, {
     timestamp: "2026-01-01T00:00:00",
     transaction_ids: operations.map((_, index) => `tx${blockNumber}-${index}`),
     transactions: operations.map((operation) => ({ operations: [operation] })),
-  } as unknown as NumberedBlock;
+  } as never);
 }
 
 /** Counts how many times a block-reading loop was opened. */
-function blockStub(blocks: NumberedBlock[]) {
+function blockStub(blocks: NormalizedBlock[]) {
   const state = { connections: 0 };
   const streamer = {
     async *blocks(options: { signal?: AbortSignal } = {}) {
@@ -93,7 +92,7 @@ function engineStub(results: Record<string, unknown>, calls = { count: 0 }) {
   };
 }
 
-function engine(blocks: NumberedBlock[], executions: Record<string, unknown> = {}) {
+function engine(blocks: NormalizedBlock[], executions: Record<string, unknown> = {}) {
   const { streamer, state } = blockStub(blocks);
   const { validator, calls } = engineStub(executions);
   const instance = new StreamEngine(

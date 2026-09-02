@@ -1,29 +1,7 @@
-import { HiveSdkError } from "../types/index";
 import { TOKEN_ACTIONS, TOKEN_CONTRACT } from "./constants";
 import { DEFAULT_BURN_ACCOUNT, resolveBurnAccount } from "./burn";
+import { assertAccountName, assertTokenQuantity, assertTokenSymbol } from "../utils/validation";
 import type { HiveEngineContractAction } from "./types";
-
-/** Quantities must stay decimal strings — never JavaScript floats. */
-export function assertTokenQuantity(value: unknown): asserts value is string {
-  if (typeof value !== "string" || !/^\d+(\.\d+)?$/.test(value.trim())) {
-    throw new HiveSdkError(
-      "VALIDATION_ERROR",
-      `"quantity" must be a decimal string such as "100" or "100.000"`,
-    );
-  }
-}
-
-export function assertTokenSymbol(value: unknown): asserts value is string {
-  if (typeof value !== "string" || !/^[A-Z0-9.]{1,32}$/.test(value.trim())) {
-    throw new HiveSdkError("VALIDATION_ERROR", `"symbol" must be an uppercase token symbol`);
-  }
-}
-
-function assertAccount(value: unknown, field = "account"): asserts value is string {
-  if (typeof value !== "string" || value.trim() === "") {
-    throw new HiveSdkError("VALIDATION_ERROR", `"${field}" must be a non-empty string`);
-  }
-}
 
 export interface TokenActionInput {
   symbol: string;
@@ -50,7 +28,7 @@ export class TokenActionBuilder {
   /** `tokens.issue` */
   buildIssue(input: TokenActionInput): HiveEngineContractAction {
     assertTokenSymbol(input?.symbol);
-    assertAccount(input?.account);
+    assertAccountName(input?.account);
     assertTokenQuantity(input?.quantity);
     return {
       contractName: TOKEN_CONTRACT,
@@ -67,7 +45,7 @@ export class TokenActionBuilder {
   /** `tokens.transfer` */
   buildTransfer(input: TokenActionInput): HiveEngineContractAction {
     assertTokenSymbol(input?.symbol);
-    assertAccount(input?.account);
+    assertAccountName(input?.account);
     assertTokenQuantity(input?.quantity);
     return {
       contractName: TOKEN_CONTRACT,

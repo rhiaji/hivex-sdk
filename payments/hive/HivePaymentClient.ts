@@ -27,7 +27,7 @@ export interface HiveTransferPreview {
 export class HivePaymentClient extends IssuerDispatcher {
   /** Build the exact transfer operation without touching keys or the network. */
   build<T = Record<string, unknown>>(input: HiveTransferInput<T>): HiveTransferPreview {
-    const reference = requireAccountReference(input?.from, this.context.configName);
+    const reference = requireAccountReference(input?.from);
     const resolved = this.context.resolveAccount(reference.alias);
     const built = hivePaymentBuilder.build<T>(input);
 

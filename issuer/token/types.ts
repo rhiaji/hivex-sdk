@@ -2,7 +2,7 @@ import type { AccountReference } from "../../configs/AccountReference";
 import type { IssuerOperationOptions } from "../types";
 
 /** `from` is an SDK account reference such as `hive.accounts.treasury`. */
-export interface TokenMintInput extends IssuerOperationOptions {
+export interface TokenIssueInput extends IssuerOperationOptions {
   from: AccountReference;
   symbol: string;
   /** Destination blockchain account. */

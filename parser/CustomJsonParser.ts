@@ -1,12 +1,13 @@
-import type { ApiOperation, HiveOperation } from "../rpc/types";
+import { readOperation } from "../operations/detectOperation";
+import { actionPayloadParser } from "../protocol/index";
+import type { HiveOperation } from "../rpc/types";
 import type { CustomJsonEvent, CustomJsonOperationValue } from "../types/index";
 import { buildEventId, deriveAccount, safeJsonParse, toStringArray } from "../utils/helpers";
-import { isPlainObject, isStandardPayload } from "../utils/validation";
 
 export interface ParseContext {
   blockNumber: number;
   blockTimestamp: string;
-  transactionId: string;
+  transactionId: string | null;
   transactionIndex: number;
   operationIndex: number;
 }
@@ -17,25 +18,18 @@ export type ParseResult<T = Record<string, unknown>> =
   | { status: "invalid"; reason: string; operation: CustomJsonOperationValue; raw: unknown };
 
 /**
- * Single source of truth for detecting, parsing, validating and normalizing
- * Hive custom_json operations. Shared by the block streamer and the
- * transaction reader. Never throws on malformed data.
+ * THE Custom JSON detector, parser and normalizer. Shared by the block stream
+ * engine and the transaction reader. Envelope validation is delegated to the
+ * single protocol validator — there is no second `{ action, metadata }` check.
+ * Never throws on malformed data.
  */
 export class CustomJsonParser {
   /** Detect a custom_json operation in either condenser or api format. */
   extractOperation(operation: HiveOperation): CustomJsonOperationValue | null {
-    let value: unknown = null;
+    const detected = readOperation(operation);
+    if (!detected || detected.type !== "custom_json") return null;
 
-    if (Array.isArray(operation)) {
-      if (operation[0] !== "custom_json") return null;
-      value = operation[1];
-    } else if (isPlainObject(operation)) {
-      const type = (operation as ApiOperation).type;
-      if (type !== "custom_json" && type !== "custom_json_operation") return null;
-      value = (operation as ApiOperation).value;
-    }
-
-    if (!isPlainObject(value)) return null;
+    const value = detected.value;
     if (typeof value["id"] !== "string" || typeof value["json"] !== "string") return null;
 
     return {
@@ -69,16 +63,17 @@ export class CustomJsonParser {
       };
     }
 
-    if (!isStandardPayload(parsed.value)) {
+    const envelope = actionPayloadParser.fromValueResult<T>(parsed.value);
+    if (!envelope.valid) {
       return {
         status: "invalid",
-        reason: "Payload does not follow the { action, metadata } protocol",
+        reason: envelope.reason,
         operation: customJson,
         raw: operation,
       };
     }
 
-    const payload = parsed.value;
+    const payload = envelope.value;
 
     if (filter?.actions && filter.actions.length > 0 && !filter.actions.includes(payload.action)) {
       return { status: "not_custom_json" };
@@ -98,7 +93,7 @@ export class CustomJsonParser {
       account: deriveAccount(customJson.required_auths, customJson.required_posting_auths),
       id: customJson.id,
       action: payload.action,
-      metadata: (payload.metadata ?? null) as T | null,
+      metadata: payload.metadata,
       requiredAuths: customJson.required_auths,
       requiredPostingAuths: customJson.required_posting_auths,
       raw: operation,

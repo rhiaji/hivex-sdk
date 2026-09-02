@@ -1,7 +1,6 @@
 import { CustomJsonBuilder } from "../transaction/CustomJsonBuilder";
 import { HiveSdkError } from "../types/index";
 import { isPlainObject } from "../utils/validation";
-import { KeychainIssuer } from "./KeychainIssuer";
 import { KeychainPayments } from "./KeychainPayments";
 import type {
   HiveKeychainApi,
@@ -19,18 +18,11 @@ import type {
 export class KeychainClient {
   private readonly builder: CustomJsonBuilder;
 
-  /**
-   * Hive Engine token/NFT operations signed directly by the browser account.
-   * Independent of configurations, aliases and environment variables.
-   */
-  public readonly issuer: KeychainIssuer;
-
   /** Native and Layer 2 payments with standardized triggers. */
   public readonly payments: KeychainPayments;
 
   constructor(builder: CustomJsonBuilder = new CustomJsonBuilder()) {
     this.builder = builder;
-    this.issuer = new KeychainIssuer(this);
     this.payments = new KeychainPayments(this);
   }
 

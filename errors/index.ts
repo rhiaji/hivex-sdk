@@ -14,12 +14,10 @@ export class HiveConfigurationError extends HiveSdkError {
 }
 
 export class HiveAccountNotFoundError extends HiveSdkError {
-  constructor(alias: string, config: string) {
-    super(
-      "ACCOUNT_ALIAS_NOT_FOUND",
-      `Account alias "${alias}" was not found in configuration "${config}".`,
-      { alias, config },
-    );
+  constructor(alias: string) {
+    super("ACCOUNT_ALIAS_NOT_FOUND", `Account alias "${alias}" was not found in the configuration.`, {
+      alias,
+    });
     this.name = "HiveAccountNotFoundError";
   }
 }
@@ -32,7 +30,7 @@ export class HiveAccountResolutionError extends HiveSdkError {
 }
 
 export class HiveEnvironmentVariableMissingError extends HiveSdkError {
-  constructor(name: string, context: { alias?: string; config?: string; purpose?: string } = {}) {
+  constructor(name: string, context: { alias?: string; purpose?: string } = {}) {
     super(
       "ENV_VAR_MISSING",
       context.purpose === "key"
@@ -45,12 +43,12 @@ export class HiveEnvironmentVariableMissingError extends HiveSdkError {
 }
 
 export class HiveSigningKeyMissingError extends HiveSdkError {
-  constructor(alias: string, config?: string) {
+  constructor(alias: string) {
     super(
       "SIGNING_KEY_MISSING",
       `A signing key is required for backend transaction signing. ` +
         `The account alias "${alias}" does not provide "key" or "keyEnv".`,
-      { alias, ...(config ? { config } : {}) },
+      { alias },
     );
     this.name = "HiveSigningKeyMissingError";
   }

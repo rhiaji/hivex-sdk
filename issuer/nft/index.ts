@@ -1,5 +1,5 @@
 export { NftIssuer } from "./NftIssuer";
-export { NftTransactionBuilder, countNftInstances, assertNftSymbol } from "./NftTransactionBuilder";
+export { NftActionBuilder, countNftInstances, assertNftSymbol } from "../../engine/NftActionBuilder";
 export {
   NftValidationError,
   NftSymbolError,
@@ -11,9 +11,9 @@ export {
 } from "./errors";
 export type {
   NftAccountType,
-  NftMintInput,
-  NftMintInstance,
-  NftMintMultipleInput,
+  NftIssueInput,
+  NftIssueInstance,
+  NftIssueMultipleInput,
   NftTransferInput,
   NftTransferItem,
   NftTransactionResult,

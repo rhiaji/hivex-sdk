@@ -4,11 +4,11 @@ import { HiveSdkError } from "../../types/index";
 import { IssuerDispatcher } from "../IssuerDispatcher";
 import type { IssuerOperationPreview } from "../types";
 import { NftAccountResolutionError, NftIssuanceError, NftBurnError, NftTransferError, NftValidationError } from "./errors";
-import { NftTransactionBuilder, countNftInstances } from "./NftTransactionBuilder";
+import { NftActionBuilder, countNftInstances } from "../../engine/NftActionBuilder";
 import type {
   NftBurnInput,
-  NftMintInput,
-  NftMintMultipleInput,
+  NftIssueInput,
+  NftIssueMultipleInput,
   NftTransactionResult,
   NftTransferInput,
 } from "./types";
@@ -17,18 +17,18 @@ import type {
  * Public backend NFT API.
  *
  * Responsibilities: validation, account alias resolution, payload generation
- * (delegated to NftTransactionBuilder), signing + broadcasting and result
+ * (delegated to NftActionBuilder), signing + broadcasting and result
  * normalization. It never stores private keys and never performs raw RPC POSTs
- * — that belongs to hive.signer and hive.rpc. Browser flows use the separate
- * `hive.keychain.issuer.nft` API.
+ * — that belongs to the dispatcher and hive.rpc. Browser flows use the separate
+ * `hive.keychainIssuer.nft` API.
  */
 export class NftIssuer extends IssuerDispatcher {
   /** Reusable Hive Engine NFT action builder (also usable by Keychain flows). */
-  public readonly actions = new NftTransactionBuilder();
+  public readonly actions = new NftActionBuilder();
 
   /** Offline preview of an issue operation. No keys, no network. */
-  buildMint<TProperties extends Record<string, unknown> = Record<string, unknown>>(
-    input: NftMintInput<TProperties>,
+  buildIssue<TProperties extends Record<string, unknown> = Record<string, unknown>>(
+    input: NftIssueInput<TProperties>,
   ): IssuerOperationPreview {
     return this.previewNftAction({
       from: input.from,
@@ -39,8 +39,8 @@ export class NftIssuer extends IssuerDispatcher {
   }
 
   /** Offline preview of an issueMultiple operation. No keys, no network. */
-  buildMintMultiple<TProperties extends Record<string, unknown> = Record<string, unknown>>(
-    input: NftMintMultipleInput<TProperties>,
+  buildIssueMultiple<TProperties extends Record<string, unknown> = Record<string, unknown>>(
+    input: NftIssueMultipleInput<TProperties>,
   ): IssuerOperationPreview {
     return this.previewNftAction({
       from: input.from,
@@ -69,8 +69,8 @@ export class NftIssuer extends IssuerDispatcher {
     });
   }
 
-  async mint<TProperties extends Record<string, unknown> = Record<string, unknown>>(
-    input: NftMintInput<TProperties>,
+  async issue<TProperties extends Record<string, unknown> = Record<string, unknown>>(
+    input: NftIssueInput<TProperties>,
   ): Promise<NftTransactionResult> {
     const action = this.actions.buildIssue<TProperties>(input);
     return this.executeNftTransaction({
@@ -82,8 +82,8 @@ export class NftIssuer extends IssuerDispatcher {
     });
   }
 
-  async mintMultiple<TProperties extends Record<string, unknown> = Record<string, unknown>>(
-    input: NftMintMultipleInput<TProperties>,
+  async issueMultiple<TProperties extends Record<string, unknown> = Record<string, unknown>>(
+    input: NftIssueMultipleInput<TProperties>,
   ): Promise<NftTransactionResult> {
     const action = this.actions.buildIssueMultiple<TProperties>(input);
     return this.executeNftTransaction({
@@ -168,7 +168,7 @@ export class NftIssuer extends IssuerDispatcher {
     return errorFactory((error as Error)?.message ?? "NFT transaction failed");
   }
 
-  /** Single execution flow shared by mint, mintMultiple and transfer. */
+  /** Single execution flow shared by issue, issueMultiple and transfer. */
   private async executeNftTransaction(params: {
     from: AccountReference;
     account?: string;

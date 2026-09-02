@@ -8,7 +8,7 @@ import { enginePaymentParser } from "./engine/EnginePaymentParser";
 import { EnginePaymentValidator } from "./engine/EnginePaymentValidator";
 import type { EngineRpcClient } from "./engine/EngineRpcClient";
 import { PaymentValidator } from "./PaymentValidator";
-import type { PaymentParser } from "./PaymentParser";
+import type { TransactionReader } from "../reader/TransactionReader";
 import type { ParsedPayment } from "./types";
 
 describe("action payload protocol", () => {
@@ -206,13 +206,13 @@ describe("payment validation", () => {
     trigger: { action: "purchase", metadata: { orderId: "A-1" } },
   };
 
-  const parserStub = (payments: ParsedPayment[]) =>
-    ({ parseTransaction: async () => payments }) as unknown as PaymentParser;
+  const readerStub = (payments: ParsedPayment[]) =>
+    ({ read: async () => ({ payments }) }) as unknown as TransactionReader;
   const engineStub = (result: unknown) =>
     ({ verify: async () => result }) as unknown as EnginePaymentValidator;
 
   it("accepts a payment matching every expectation", async () => {
-    const validator = new PaymentValidator(parserStub([nativePayment]), engineStub(null));
+    const validator = new PaymentValidator(readerStub([nativePayment]), engineStub(null));
     const result = await validator.validate({
       transactionId: "tx1",
       expected: { from: "alice", account: "bob", symbol: "HIVE", quantity: "10", action: "purchase" },
@@ -222,7 +222,7 @@ describe("payment validation", () => {
   });
 
   it("marks a mismatched amount as invalid", async () => {
-    const validator = new PaymentValidator(parserStub([nativePayment]), engineStub(null));
+    const validator = new PaymentValidator(readerStub([nativePayment]), engineStub(null));
     const result = await validator.validate({
       transactionId: "tx1",
       expected: { quantity: "5" },
@@ -239,7 +239,7 @@ describe("payment validation", () => {
       status: "pending",
     };
     const validator = new PaymentValidator(
-      parserStub([enginePayment]),
+      readerStub([enginePayment]),
       engineStub({ success: false, status: "failed", error: "overdrawn balance" }),
     );
     const result = await validator.validate({ transactionId: "tx1" });
@@ -247,7 +247,7 @@ describe("payment validation", () => {
   });
 
   it("reports invalid when the transaction carries no supported payment", async () => {
-    const validator = new PaymentValidator(parserStub([]), engineStub(null));
+    const validator = new PaymentValidator(readerStub([]), engineStub(null));
     const result = await validator.validate({ transactionId: "tx1" });
     expect(result.status).toBe("invalid");
   });

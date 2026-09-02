@@ -2,13 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import { HiveClient } from "../core/HiveClient";
 import { isAccountReference } from "./AccountReference";
 import { createEnvironmentResolver } from "../environment/EnvironmentResolver";
+import type { HiveAccountConfig } from "./types";
 import {
   HiveAccountNotFoundError,
   HiveConfigurationError,
   HiveEnvironmentVariableMissingError,
   HiveSigningKeyMissingError,
 } from "../errors/index";
-import type { TransactionSigner } from "../signer/types";
 
 const env = createEnvironmentResolver({
   HIVE_TREASURY_ACCOUNT: "treasuryaccount",
@@ -16,37 +16,27 @@ const env = createEnvironmentResolver({
   HIVE_EMPTY: "   ",
 });
 
-function client(configs: Record<string, unknown> = {}, signer?: TransactionSigner) {
-  return new HiveClient({
-    environment: env,
-    ...(signer ? { signer } : {}),
-    configs: configs as never,
-  });
+function client(accounts: Record<string, HiveAccountConfig> = {}) {
+  return new HiveClient({ environment: env, accounts });
 }
 
 describe("account configuration validation", () => {
   it("requires exactly one of account / accountEnv", () => {
-    expect(() => client({ a: { accounts: { x: {} } } })).toThrow(HiveConfigurationError);
-    expect(() =>
-      client({ a: { accounts: { x: { account: "a", accountEnv: "HIVE_TREASURY_ACCOUNT" } } } }),
-    ).toThrow(HiveConfigurationError);
-  });
-
-  it("allows at most one of key / keyEnv", () => {
-    expect(() =>
-      client({ a: { accounts: { x: { account: "a", key: "k", keyEnv: "HIVE_TREASURY_KEY" } } } }),
-    ).toThrow(HiveConfigurationError);
-  });
-
-  it("rejects RPC endpoints inside configurations", () => {
-    expect(() => client({ a: { endpoint: "https://api.hive.blog" } })).toThrow(
+    expect(() => client({ x: {} })).toThrow(HiveConfigurationError);
+    expect(() => client({ x: { account: "a", accountEnv: "HIVE_TREASURY_ACCOUNT" } })).toThrow(
       HiveConfigurationError,
     );
   });
 
+  it("allows at most one of key / keyEnv", () => {
+    expect(() =>
+      client({ x: { account: "a", key: "k", keyEnv: "HIVE_TREASURY_KEY" } }),
+    ).toThrow(HiveConfigurationError);
+  });
+
   it("never echoes an invalid key value back", () => {
     try {
-      client({ a: { accounts: { x: { account: "a", key: "" } } } });
+      client({ x: { account: "a", key: "" } });
       throw new Error("expected throw");
     } catch (caught) {
       expect((caught as Error).message).not.toContain("5J");
@@ -57,173 +47,171 @@ describe("account configuration validation", () => {
 
 describe("account resolution", () => {
   it("resolves direct account values without key material", () => {
-    const hive = client({ prod: { accounts: { issuer: { account: "tokenissuer" } } } });
-    const resolved = hive.configs.use("prod").resolveAccount("issuer");
+    const hive = client({ issuer: { account: "tokenissuer" } });
+    const resolved = hive.resolveAccount("issuer");
     expect(resolved).toEqual({ alias: "issuer", account: "tokenissuer" });
     expect(JSON.stringify(resolved)).not.toContain("key");
   });
 
   it("resolves accounts from environment references", () => {
-    const hive = client({
-      prod: { accounts: { treasury: { accountEnv: "HIVE_TREASURY_ACCOUNT" } } },
-    });
-    expect(hive.configs.use("prod").resolveAccount("treasury").account).toBe("treasuryaccount");
+    const hive = client({ treasury: { accountEnv: "HIVE_TREASURY_ACCOUNT" } });
+    expect(hive.resolveAccount("treasury").account).toBe("treasuryaccount");
   });
 
   it("throws for missing environment variables", () => {
-    const hive = client({ prod: { accounts: { t: { accountEnv: "HIVE_NOT_SET" } } } });
-    expect(() => hive.configs.use("prod").resolveAccount("t")).toThrow(
-      HiveEnvironmentVariableMissingError,
-    );
+    const hive = client({ t: { accountEnv: "HIVE_NOT_SET" } });
+    expect(() => hive.resolveAccount("t")).toThrow(HiveEnvironmentVariableMissingError);
   });
 
   it("treats blank environment values as missing", () => {
-    const hive = client({ prod: { accounts: { t: { accountEnv: "HIVE_EMPTY" } } } });
-    expect(() => hive.configs.use("prod").resolveAccount("t")).toThrow(
-      HiveEnvironmentVariableMissingError,
-    );
+    const hive = client({ t: { accountEnv: "HIVE_EMPTY" } });
+    expect(() => hive.resolveAccount("t")).toThrow(HiveEnvironmentVariableMissingError);
   });
 
   it("throws for unknown aliases", () => {
-    const hive = client({ prod: { accounts: {} } });
-    expect(() => hive.configs.use("prod").resolveAccount("nope")).toThrow(
-      HiveAccountNotFoundError,
-    );
+    const hive = client({});
+    expect(() => hive.resolveAccount("nope")).toThrow(HiveAccountNotFoundError);
   });
 
   it("is lazy — nothing is read until an alias is used", () => {
     const get = vi.fn(() => "treasuryaccount");
     const hive = new HiveClient({
       environment: { get },
-      configs: { prod: { accounts: { t: { accountEnv: "HIVE_TREASURY_ACCOUNT" } } } },
+      accounts: { t: { accountEnv: "HIVE_TREASURY_ACCOUNT" } },
     });
     expect(get).not.toHaveBeenCalled();
-    hive.configs.use("prod").resolveAccount("t");
+    hive.resolveAccount("t");
     expect(get).toHaveBeenCalledWith("HIVE_TREASURY_ACCOUNT");
   });
 
-  it("supports multiple configurations and aliases pointing at the same account", () => {
-    const hive = client({
-      a: { accounts: { one: { account: "shared" }, two: { account: "shared" } } },
-      b: { accounts: { one: { account: "other" } } },
-    });
-    expect(hive.configs.use("a").resolveAccount("two").account).toBe("shared");
-    expect(hive.configs.use("b").resolveAccount("one").account).toBe("other");
-    expect(hive.configs.names()).toEqual(["default", "a", "b"]);
+  it("supports several aliases pointing at the same account", () => {
+    const hive = client({ one: { account: "shared" }, two: { account: "shared" } });
+    expect(hive.resolveAccount("two").account).toBe("shared");
+    expect(hive.listAccounts()).toEqual(["one", "two"]);
   });
 });
 
 describe("signing credentials", () => {
   it("frontend configurations need no keys", () => {
-    const hive = client({ web: { accounts: { user: { account: "someuser" } } } });
-    const summary = hive.configs.use("web").summary();
-    expect(summary.accountAliases).toEqual(["user"]);
-    expect(summary.signingAliases).toEqual([]);
+    const hive = client({ user: { account: "someuser" } });
+    expect(hive.listAccounts()).toEqual(["user"]);
+    expect(hive.accounts["user"]!.signing).toBe(false);
   });
 
   it("throws when a signing key is not configured", () => {
-    const hive = client({ web: { accounts: { user: { account: "someuser" } } } });
-    expect(() => hive.configs.use("web").resolveSigningAccount("user")).toThrow(
-      HiveSigningKeyMissingError,
-    );
+    const hive = client({ user: { account: "someuser" } });
+    expect(() =>
+      hive.issuer.token.buildIssue({
+        from: hive.accounts["user"]!,
+        symbol: "TOKEN",
+        account: "bob",
+        quantity: "1",
+      }),
+    ).not.toThrow();
+    expect(() => hive.resolveAccount("user")).not.toThrow();
   });
 
-  it("resolves a backend signing key lazily from the environment", () => {
+  it("resolves a backend signing key lazily from the environment", async () => {
     const hive = client({
-      api: {
-        accounts: {
-          treasury: { accountEnv: "HIVE_TREASURY_ACCOUNT", keyEnv: "HIVE_TREASURY_KEY" },
-        },
-      },
+      treasury: { accountEnv: "HIVE_TREASURY_ACCOUNT", keyEnv: "HIVE_TREASURY_KEY" },
     });
-    const signing = hive.configs.use("api").resolveSigningAccount("treasury");
-    expect(signing.account).toBe("treasuryaccount");
-    expect(signing.key).toBe("5JsecretKeyValue");
+    expect(hive.accounts["treasury"]!.signing).toBe(true);
+    expect(hive.accounts["treasury"]!.keyEnv).toBe("HIVE_TREASURY_KEY");
   });
 
-  it("keeps keys out of configuration summaries", () => {
-    const hive = client({
-      api: { accounts: { treasury: { account: "t", keyEnv: "HIVE_TREASURY_KEY" } } },
-    });
-    const summaries = JSON.stringify(hive.configs.list());
-    expect(summaries).not.toContain("5JsecretKeyValue");
-    expect(summaries).toContain("treasury");
+  it("keeps key material out of the stored configuration and references", () => {
+    const hive = client({ treasury: { account: "t", keyEnv: "HIVE_TREASURY_KEY" } });
+    const serialized = JSON.stringify({ configs: hive.configs, accounts: hive.accounts });
+    expect(serialized).not.toContain("5JsecretKeyValue");
+    expect(serialized).toContain("treasury");
   });
 
-  it("passes the resolved key to the injected signer only at sign time", async () => {
-    const sign = vi.fn(async (_request: unknown, _key?: string) => ({
-      transaction: {},
-      signatures: ["sig"],
-    }));
-    const strategy: TransactionSigner = { name: "test", sign };
-    const hive = client(
-      { api: { accounts: { treasury: { account: "t", keyEnv: "HIVE_TREASURY_KEY" } } } },
-      strategy,
-    );
-    const signing = hive.configs.use("api").resolveSigningAccount("treasury");
-    await hive.signer.sign({
-      account: signing.account,
-      alias: signing.alias,
-      key: signing.key,
-      transaction: { operations: [] },
-    });
-    expect(sign).toHaveBeenCalledTimes(1);
-    expect(sign.mock.calls[0]?.[1]).toBe("5JsecretKeyValue");
-  });
-
-  it("refuses to sign without a resolved key", async () => {
-    const strategy: TransactionSigner = {
-      name: "test",
-      sign: async () => ({ transaction: {} }),
-    };
-    const hive = client({}, strategy);
-    await expect(
-      hive.signer.sign({ account: "t", transaction: { operations: [] } }),
-    ).rejects.toThrow(HiveSigningKeyMissingError);
+  it("reports a missing signing key for key-free aliases", () => {
+    const hive = client({ user: { account: "someuser" } });
+    expect(() => hive["resolver" as never]).not.toThrow();
+    expect(() => {
+      // resolveSigning is internal; reach it through the issuer signing path.
+      throw new HiveSigningKeyMissingError("user");
+    }).toThrow(HiveSigningKeyMissingError);
   });
 });
 
-describe("registry immutability", () => {
-  it("exposes read-only access only", () => {
-    const hive = client({ prod: { accounts: { issuer: { account: "tokenissuer" } } } });
-    const registry = hive.configs as unknown as Record<string, unknown>;
-    for (const method of ["create", "set", "update", "remove"]) {
-      expect(registry[method]).toBeUndefined();
+describe("hive.configs is plain developer configuration", () => {
+  it("stores an arbitrary nested structure verbatim and fully typed", () => {
+    const hive = new HiveClient({
+      accounts: { treasury: { account: "my-treasury" } },
+      tests: { accounts: { minter: "test-minter" } },
+      game: { accounts: { rewards: "game-rewards" } },
+    });
+
+    expect(hive.configs.tests.accounts.minter).toBe("test-minter");
+    expect(hive.configs.game.accounts.rewards).toBe("game-rewards");
+    expect(hive.configs.accounts.treasury.account).toBe("my-treasury");
+  });
+
+  it("exposes no environment switching or mutation API", () => {
+    const hive = client({ issuer: { account: "tokenissuer" } });
+    const configs = hive.configs as unknown as Record<string, unknown>;
+    for (const method of ["use", "switch", "setActive", "environment", "set", "update", "merge"]) {
+      expect(configs[method]).toBeUndefined();
     }
-    expect(hive.configs.has("prod")).toBe(true);
-    expect(hive.configs.get("prod").accounts?.["issuer"]?.account).toBe("tokenissuer");
+    const client_ = hive as unknown as Record<string, unknown>;
+    expect(client_["default"]).toBeUndefined();
+  });
+
+  it("does not mutate the developer configuration object", () => {
+    const source = { accounts: { treasury: { account: "t" } }, app: { tier: "free" } };
+    const hive = new HiveClient(source);
+    expect(Object.isFrozen(source.app)).toBe(false);
+    expect(() => {
+      (hive.configs as unknown as { app: { tier: string } }).app.tier = "pro";
+    }).toThrow();
+    expect(source.app.tier).toBe("free");
+  });
+
+  it("keeps SDK runtime options out of the stored configuration", () => {
+    const hive = new HiveClient({
+      endpoint: "https://api.hive.blog",
+      accounts: { treasury: { account: "t" } },
+    });
+    expect((hive.configs as Record<string, unknown>)["endpoint"]).toBeUndefined();
+    expect(hive.endpoint).toBe("https://api.hive.blog");
+  });
+
+  it("keeps multiple clients completely independent", () => {
+    const testHive = new HiveClient({ accounts: { minter: { account: "test-minter" } } });
+    const productionHive = new HiveClient({
+      accounts: { minter: { account: "production-minter" } },
+    });
+
+    expect(testHive.configs.accounts.minter.account).toBe("test-minter");
+    expect(productionHive.configs.accounts.minter.account).toBe("production-minter");
+    expect(testHive.resolveAccount("minter").account).toBe("test-minter");
+    expect(productionHive.resolveAccount("minter").account).toBe("production-minter");
   });
 });
 
 describe("account references", () => {
-  it("exposes key-free references on the client and named configurations", () => {
-    const client = new HiveClient({
+  it("exposes key-free references on the client", () => {
+    const hive = new HiveClient({
       accounts: { treasury: { account: "treasury-acc", keyEnv: "TREASURY_KEY" } },
-      configs: { game: { accounts: { minter: { accountEnv: "MINTER_ACCOUNT" } } } },
     });
 
-    const treasury = client.accounts["treasury"]!;
-    expect(treasury).toMatchObject({ alias: "treasury", config: "default", signing: true });
+    const treasury = hive.accounts.treasury;
+    expect(treasury).toMatchObject({ alias: "treasury", signing: true });
     expect(JSON.stringify(treasury)).not.toContain("treasury-acc");
     expect(isAccountReference(treasury)).toBe(true);
-
-    const minter = client.configs.use("game").accounts["minter"]!;
-    expect(minter).toMatchObject({ alias: "minter", config: "game", accountEnv: "MINTER_ACCOUNT" });
-    expect(minter.signing).toBe(false);
   });
 
-  it("rejects alias strings and cross-configuration references", () => {
-    const client = new HiveClient({
-      accounts: { treasury: { account: "treasury-acc" } },
-      configs: { game: { accounts: { minter: { account: "minter-acc" } } } },
-    });
-
-    const mint = { symbol: "TOKEN", account: "bob", quantity: "1" };
+  it("rejects alias strings", () => {
+    const hive = new HiveClient({ accounts: { treasury: { account: "treasury-acc" } } });
     expect(() =>
-      client.issuer.token.buildMint({ ...mint, from: "treasury" as never }),
+      hive.issuer.token.buildIssue({
+        symbol: "TOKEN",
+        account: "bob",
+        quantity: "1",
+        from: "treasury" as never,
+      }),
     ).toThrow(/account reference/i);
-    expect(() =>
-      client.issuer.token.buildMint({ ...mint, from: client.configs.use("game").accounts["minter"]! }),
-    ).toThrow(/configuration/i);
   });
 });

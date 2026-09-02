@@ -1,8 +1,12 @@
 {
   "name": "hivexph-sdk",
-  "version": "0.1.0",
-  "description": "Reusable TypeScript SDK for Hive Custom JSON operations: configuration, signing, Keychain, Hive Engine issuers, block streaming and transaction reading.",
+  "version": "1.0.0",
+  "description": "TypeScript SDK for Hive Custom JSON: configuration, backend signing, Hive Keychain, Hive Engine token/NFT issuers, block streaming, payments and transaction reading.",
   "license": "MIT",
+  "homepage": "https://github.com/rhiaji/hivexph-sdk/tree/main/package-manager#readme",
+  "bugs": {
+    "url": "https://github.com/rhiaji/hivexph-sdk/issues"
+  },
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.js",
@@ -15,20 +19,46 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist", "README.md"],
-  "engines": {
-    "node": ">=18"
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
-  "keywords": ["hive", "custom_json", "hive-engine", "keychain", "blockchain", "sdk"],
+  "engines": {
+    "node": ">=18",
+    "npm": ">=9"
+  },
+  "keywords": [
+    "hive",
+    "custom_json",
+    "hive-engine",
+    "keychain",
+    "blockchain",
+    "sdk"
+  ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsup --config tsup.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepack": "npm run build"
   },
   "peerDependencies": {},
-  "dependencies": {},
+  "dependencies": {
+    "@noble/hashes": "^2.4.0",
+    "@noble/secp256k1": "^3.2.0"
+  },
   "devDependencies": {
+    "tsup": "^8.5.1",
     "typescript": "^5.8.3",
     "vitest": "^4.1.11"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rhiaji/hivexph-sdk.git",
+    "directory": "package-manager"
   }
 }

@@ -18,3 +18,18 @@ export interface BuiltCustomJsonOperation<T = Record<string, unknown>> {
   /** The standardized payload before serialization (for debugging). */
   payload: CustomJsonPayload<T>;
 }
+
+/** A Hive transaction envelope, before signatures are attached. */
+export interface UnsignedTransaction {
+  ref_block_num: number;
+  ref_block_prefix: number;
+  expiration: string;
+  operations: unknown[];
+  extensions: unknown[];
+  [key: string]: unknown;
+}
+
+/** A transaction envelope carrying its signatures, ready to broadcast. */
+export interface SignedTransaction extends UnsignedTransaction {
+  signatures: string[];
+}

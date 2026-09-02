@@ -1,6 +1,5 @@
 export { PaymentClient } from "./PaymentClient";
 export type { PaymentClientOptions } from "./PaymentClient";
-export { PaymentParser } from "./PaymentParser";
 export { PaymentValidator } from "./PaymentValidator";
 export { PaymentWatcher } from "./PaymentWatcher";
 export type { StreamEngineFactory } from "./PaymentWatcher";

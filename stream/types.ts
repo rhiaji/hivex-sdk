@@ -1,7 +1,7 @@
-import type { NumberedBlock } from "../rpc/types";
 import type { CustomJsonEvent } from "../types/index";
+import type { NormalizedBlock } from "./normalizeBlock";
 
-export type { NumberedBlock, CustomJsonEvent };
+export type { CustomJsonEvent, NormalizedBlock };
 
 export interface BlockStreamOptions {
   /** First block to read. Defaults to the current head block (live streaming). */

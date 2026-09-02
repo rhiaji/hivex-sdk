@@ -1,8 +1,8 @@
 import type { KeychainClient } from "../keychain/KeychainClient";
 import type { RpcClient } from "../rpc/RpcClient";
-import type { Signer } from "../signer/Signer";
 import type { CustomJsonBuilder } from "../transaction/CustomJsonBuilder";
 import { TransactionAssembler } from "../transaction/TransactionAssembler";
+import { signTransaction } from "../transaction/signTransaction";
 import { HiveSdkError } from "../types/index";
 import { isPlainObject } from "../utils/validation";
 import type { ResolvedAccount, ResolvedSigningAccount } from "../configs/types";
@@ -14,13 +14,11 @@ import type { HiveEngineContractAction } from "../engine/index";
 export interface IssuerContext {
   rpc: RpcClient;
   keychain: KeychainClient;
-  signer: Signer;
   builder: CustomJsonBuilder;
   /** Name of the configuration this issuer is bound to. */
-  configName: string;
   resolveAccount: (alias: string) => ResolvedAccount;
-  /** Internal: resolves account + signing key lazily, only when signing. */
-  resolveSigningAccount?: (alias: string) => ResolvedSigningAccount;
+  /** Resolves account + private key lazily, only when a transaction is signed. */
+  resolveSigningAccount: (alias: string) => ResolvedSigningAccount;
   /** Default custom_json application id from configuration options. */
   applicationId?: string;
 }
@@ -40,7 +38,7 @@ export interface DispatchInput {
  * alias -> account -> custom_json -> sign -> broadcast.
  *
  * This layer always signs with a resolved private key and broadcasts over RPC.
- * Browser flows live in a completely separate API (`hive.keychain.issuer`).
+ * Browser flows live in a completely separate API (`hive.keychainIssuer`).
  */
 export class IssuerDispatcher {
   protected readonly context: IssuerContext;
@@ -86,7 +84,7 @@ export class IssuerDispatcher {
     account?: string;
     id: string;
   }): IssuerOperationPreview {
-    const reference = requireAccountReference(input.from, this.context.configName);
+    const reference = requireAccountReference(input.from);
     const resolved = this.context.resolveAccount(reference.alias);
     const json = JSON.stringify(input.engineAction);
 
@@ -102,7 +100,7 @@ export class IssuerDispatcher {
 
   /** Offline preview of a `{ action, metadata }` protocol operation. */
   protected previewProtocolAction(input: DispatchInput): IssuerOperationPreview {
-    const reference = requireAccountReference(input.from, this.context.configName);
+    const reference = requireAccountReference(input.from);
     const resolved = this.context.resolveAccount(reference.alias);
     const applicationId = this.resolveApplicationId(input.id);
 
@@ -147,7 +145,7 @@ export class IssuerDispatcher {
     );
   }
 
-  /** Assemble, sign through hive.signer and broadcast via hive.rpc. */
+  /** Assemble, sign with the configured private key and broadcast via hive.rpc. */
   protected async signAndBroadcast(
     resolved: Pick<ResolvedAccount, "alias" | "account">,
     customJsonOperation: unknown[],
@@ -155,24 +153,16 @@ export class IssuerDispatcher {
   ): Promise<IssuerTransactionResult> {
     // Private key resolution happens here and nowhere else: as late as
     // possible, only for the alias actually being used, and never cached.
-    const signing: ResolvedSigningAccount | undefined = this.context.resolveSigningAccount
-      ? this.context.resolveSigningAccount(resolved.alias)
-      : undefined;
+    const signing: ResolvedSigningAccount = this.context.resolveSigningAccount(resolved.alias);
 
     const assembler = new TransactionAssembler(this.context.rpc);
     const unsigned = await assembler.build([customJsonOperation]);
-
-    const signed = await this.context.signer.sign({
-      account: resolved.account,
-      alias: resolved.alias,
-      ...(signing ? { key: signing.key } : {}),
-      transaction: unsigned,
-    });
+    const signed = signTransaction(unsigned, signing.key);
 
     let raw: unknown;
     try {
       raw = await this.context.rpc.call("condenser_api.broadcast_transaction_synchronous", [
-        signed.transaction,
+        signed,
       ]);
     } catch (error) {
       if (error instanceof HiveSdkError) throw error;

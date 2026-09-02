@@ -1,6 +1,6 @@
-import { actionPayloadParser } from "../../protocol/index";
-import { isPlainObject } from "../../utils/validation";
+import { readOperation } from "../../operations/detectOperation";
 import { parseNativeAsset } from "../amount";
+import { triggerFromMemo } from "../trigger";
 import type { ParsedPayment } from "../types";
 
 export interface HiveOperationContext {
@@ -10,7 +10,7 @@ export interface HiveOperationContext {
 }
 
 /**
- * Reads native HIVE / HBD transfers out of raw block data.
+ * THE native HIVE / HBD transfer normalizer.
  * Never throws — unrecognized operations simply return null.
  */
 export class HivePaymentParser {
@@ -19,17 +19,16 @@ export class HivePaymentParser {
     operation: unknown,
     context: HiveOperationContext = {},
   ): ParsedPayment<T> | null {
-    const normalized = this.normalizeOperation(operation);
-    if (!normalized || normalized.type !== "transfer") return null;
+    const detected = readOperation(operation);
+    if (!detected || detected.type !== "transfer") return null;
 
-    const value = normalized.value;
+    const value = detected.value;
     const from = value["from"];
     const to = value["to"];
     const asset = parseNativeAsset(value["amount"]);
     if (typeof from !== "string" || typeof to !== "string" || !asset) return null;
 
     const memo = typeof value["memo"] === "string" ? value["memo"] : null;
-    const trigger = actionPayloadParser.parse<T>(memo);
 
     return {
       network: "hive",
@@ -45,29 +44,13 @@ export class HivePaymentParser {
         from,
         account: to,
         symbol: asset.symbol,
+        // Quantity stays a decimal string — never a JavaScript float.
         quantity: asset.quantity,
         memo,
       },
-      trigger,
+      trigger: triggerFromMemo<T>(memo),
       raw: operation,
     };
-  }
-
-  private normalizeOperation(
-    operation: unknown,
-  ): { type: string; value: Record<string, unknown> } | null {
-    if (Array.isArray(operation) && typeof operation[0] === "string") {
-      const value = operation[1];
-      return isPlainObject(value) ? { type: operation[0], value } : null;
-    }
-    if (isPlainObject(operation)) {
-      const type = operation["type"];
-      const value = operation["value"];
-      if (typeof type === "string" && isPlainObject(value)) {
-        return { type: type.replace(/_operation$/, ""), value };
-      }
-    }
-    return null;
   }
 }
 

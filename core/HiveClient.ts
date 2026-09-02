@@ -1,109 +1,189 @@
-import type { BeaconClient } from "../beacon/BeaconClient";
-import { ConfigRegistry } from "../configs/ConfigRegistry";
-import type { ConfigContext } from "../configs/ConfigContext";
-import { DEFAULT_CONFIG_NAME, type HiveAccountConfig, type HiveConfig } from "../configs/types";
-import type { AccountReference } from "../configs/AccountReference";
+import { BeaconClient } from "../beacon/BeaconClient";
+import { AccountResolver } from "../configs/AccountResolver";
+import { createAccountReference, type AccountReference } from "../configs/AccountReference";
+import type { HiveAccountConfig, HiveConfig, ResolvedAccount } from "../configs/types";
+import { validateAccountConfig } from "../configs/AccountResolver";
 import { defaultEnvironmentResolver } from "../environment/EnvironmentResolver";
 import type { EnvironmentResolver } from "../environment/types";
-import type { IssuerClient } from "../issuer/IssuerClient";
-import type { KeychainClient } from "../keychain/KeychainClient";
-import type { CustomJsonParser } from "../parser/CustomJsonParser";
-import type { PaymentClient } from "../payments/PaymentClient";
-import type { RpcClient } from "../rpc/RpcClient";
-import type { ReaderClient } from "../reader/ReaderClient";
-import { Signer } from "../signer/Signer";
-import type { BlockWatcher } from "../stream/BlockWatcher";
-import type { CustomJsonWatcher } from "../stream/CustomJsonWatcher";
-import type { CustomJsonBuilder } from "../transaction/CustomJsonBuilder";
-import type { HiveClientOptions } from "./types";
+import { HiveConfigurationError } from "../errors/index";
+import { HiveAccountNotFoundError } from "../errors/index";
+import { IssuerClient } from "../issuer/IssuerClient";
+import { KeychainClient } from "../keychain/KeychainClient";
+import { KeychainIssuer } from "../keychain/KeychainIssuer";
+import { CustomJsonParser } from "../parser/CustomJsonParser";
+import { PaymentClient } from "../payments/PaymentClient";
+import { EnginePaymentValidator } from "../payments/engine/EnginePaymentValidator";
+import { EngineRpcClient } from "../payments/engine/EngineRpcClient";
+import { RpcClient } from "../rpc/RpcClient";
+import { ReaderClient } from "../reader/ReaderClient";
+import { BlockStreamer } from "../stream/BlockStreamer";
+import { BlockWatcher } from "../stream/BlockWatcher";
+import { CustomJsonWatcher } from "../stream/CustomJsonWatcher";
+import { CustomJsonBuilder } from "../transaction/CustomJsonBuilder";
+import { TransactionAssembler } from "../transaction/TransactionAssembler";
+import { isPlainObject } from "../utils/validation";
+import { RUNTIME_OPTION_KEYS, type HiveClientOptions } from "./types";
+
+/**
+ * Account references keyed by the statically declared aliases when the config
+ * literal is known, otherwise a generic record.
+ */
+type AccountReferences<TConfig extends HiveConfig> = TConfig["accounts"] extends Record<
+  string,
+  HiveAccountConfig
+>
+  ? string extends keyof TConfig["accounts"]
+    ? Record<string, AccountReference>
+    : { readonly [K in keyof TConfig["accounts"]]: AccountReference }
+  : Record<string, AccountReference>;
+
+/** The developer configuration, minus the SDK runtime options. */
+export type HiveConfigs<TConfig extends HiveConfig> = Readonly<
+  Omit<TConfig, (typeof RUNTIME_OPTION_KEYS)[number]>
+>;
 
 /**
  * Public entry point.
  *
- * Architecture:
- *   configs (aliases + env references) -> signer -> rpc / keychain / stream /
- *   reader / issuer
+ *   const hive = new HiveClient(config);
+ *   hive.configs   // exactly the configuration you passed, deeply frozen
  *
- * Configurations never carry RPC endpoints: node selection belongs to the RPC
- * system (Beacon discovery, default nodes, fallback). Private keys are resolved
- * lazily, only when a backend signing operation needs them.
+ * The SDK stores configuration; it does not manage environments. There is no
+ * active configuration, no configuration context and no runtime switching:
+ * create one client per configuration when you need more than one.
  */
-/** Named configuration contexts, only when the map is statically known. */
-type NamedConfigs<T> = string extends keyof T ? unknown : { readonly [K in keyof T]: ConfigContext };
-
-/** Account references, keyed by the statically declared aliases when available. */
-type NamedAccounts<T> = string extends keyof T
-  ? Record<string, AccountReference>
-  : { readonly [K in keyof T]: AccountReference };
-
-export class HiveClient<
-  TAccounts extends Record<string, HiveAccountConfig> = Record<string, HiveAccountConfig>,
-  TConfigs extends Record<string, HiveConfig> = Record<string, HiveConfig>,
-> {
-  public readonly signer: Signer;
-  public readonly configs: ConfigRegistry & NamedConfigs<TConfigs>;
+export class HiveClient<TConfig extends HiveConfig = HiveConfig> {
+  /** The developer-defined configuration, exactly as provided and frozen. */
+  public readonly configs: HiveConfigs<TConfig>;
 
   /**
-   * Key-free account references of the default configuration context.
+   * Key-free account references for the declared aliases.
    * Backend operations take these objects: `from: hive.accounts.treasury`.
    */
-  public readonly accounts: NamedAccounts<TAccounts>;
+  public readonly accounts: AccountReferences<TConfig>;
   public readonly environment: EnvironmentResolver;
-
-  /** Context bound to the "default" configuration. */
-  public readonly default: ConfigContext;
 
   public readonly endpoint: string;
   public readonly rpc: RpcClient;
   public readonly builder: CustomJsonBuilder;
   public readonly parser: CustomJsonParser;
   public readonly keychain: KeychainClient;
+  /** Browser token/NFT operations through Hive Keychain — no keys, no configuration. */
+  public readonly keychainIssuer: KeychainIssuer;
   /** Core block stream: hive.blocks.watch(). */
   public readonly blocks: BlockWatcher;
   /** hive.customJson.parse() and hive.customJson.watch(). */
   public readonly customJson: CustomJsonWatcher;
   public readonly reader: ReaderClient;
   public readonly beacon: BeaconClient;
+  public readonly assembler: TransactionAssembler;
   public readonly issuer: IssuerClient;
   public readonly payments: PaymentClient;
 
-  constructor(options: HiveClientOptions<TAccounts, TConfigs> = {}) {
-    const {
-      configs: extraConfigs,
-      signer,
-      environment,
-      endpoint,
-      beaconUrl,
-      ...defaultConfig
-    } = options;
+  private readonly resolver: AccountResolver;
 
+  constructor(options: HiveClientOptions<TConfig> = {} as HiveClientOptions<TConfig>) {
+    if (!isPlainObject(options as unknown)) {
+      throw new HiveConfigurationError("Configuration must be an object");
+    }
+
+    const { endpoint, beaconUrl, environment } = options as HiveClientOptions<HiveConfig>;
+
+    const config: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(options)) {
+      if ((RUNTIME_OPTION_KEYS as readonly string[]).includes(key)) continue;
+      config[key] = freezeDeep(cloneDeep(value));
+    }
+
+    const accountConfigs = (config["accounts"] ?? {}) as Record<string, HiveAccountConfig>;
+    if (!isPlainObject(accountConfigs)) {
+      throw new HiveConfigurationError(`"accounts" must be an object of aliases`);
+    }
+    for (const [alias, entry] of Object.entries(accountConfigs)) {
+      validateAccountConfig(alias, entry);
+    }
+
+    this.configs = Object.freeze(config) as HiveConfigs<TConfig>;
     this.environment = environment ?? defaultEnvironmentResolver;
-    this.signer = new Signer();
-    if (signer) this.signer.use(signer);
+    this.resolver = new AccountResolver(accountConfigs, this.environment);
 
-    this.configs = new ConfigRegistry(
-      {
-        signer: this.signer,
-        environment: this.environment,
-        ...(endpoint ? { endpoint } : {}),
-        ...(beaconUrl ? { beaconUrl } : {}),
-      },
-      { [DEFAULT_CONFIG_NAME]: defaultConfig as HiveConfig, ...(extraConfigs ?? {}) },
-    ) as ConfigRegistry & NamedConfigs<TConfigs>;
-    this.default = this.configs.use(DEFAULT_CONFIG_NAME);
-    this.accounts = this.default.accounts as NamedAccounts<TAccounts>;
+    const references: Record<string, AccountReference> = {};
+    for (const [alias, entry] of Object.entries(accountConfigs)) {
+      references[alias] = createAccountReference(alias, entry);
+    }
+    this.accounts = Object.freeze(references) as AccountReferences<TConfig>;
 
-    // Top-level modules delegate to the default configuration context.
-    this.endpoint = this.default.endpoint;
-    this.rpc = this.default.rpc;
-    this.builder = this.default.builder;
-    this.parser = this.default.parser;
-    this.keychain = this.default.keychain;
-    this.blocks = this.default.blocks;
-    this.customJson = this.default.customJson;
-    this.reader = this.default.reader;
-    this.beacon = this.default.beacon;
-    this.issuer = this.default.issuer;
-    this.payments = this.default.payments;
+    this.beacon = new BeaconClient(beaconUrl);
+    this.rpc = new RpcClient({
+      ...(endpoint ? { endpoint } : {}),
+      beacon: this.beacon,
+    });
+    this.endpoint = this.rpc.endpoint;
+    this.builder = new CustomJsonBuilder();
+    this.parser = new CustomJsonParser();
+    this.keychain = new KeychainClient(this.builder);
+    this.keychainIssuer = new KeychainIssuer(this.keychain);
+    this.assembler = new TransactionAssembler(this.rpc);
+
+    const applicationId = config["applicationId"];
+    const issuerContext = {
+      rpc: this.rpc,
+      keychain: this.keychain,
+      builder: this.builder,
+      resolveAccount: (alias: string) => this.resolver.resolve(alias),
+      resolveSigningAccount: (alias: string) => this.resolver.resolveSigning(alias),
+      ...(typeof applicationId === "string" ? { applicationId } : {}),
+    };
+    this.issuer = new IssuerClient(issuerContext);
+
+    const engineValidator = new EnginePaymentValidator(new EngineRpcClient({}));
+    this.reader = new ReaderClient({ rpc: this.rpc, parser: this.parser, engineValidator });
+    this.blocks = new BlockWatcher(new BlockStreamer(this.rpc));
+    this.customJson = new CustomJsonWatcher(this.parser, (streamOptions) =>
+      this.reader.stream(streamOptions),
+    );
+    this.payments = new PaymentClient({
+      rpc: this.rpc,
+      issuer: issuerContext,
+      engineValidator,
+      createStream: (streamOptions) => this.reader.stream(streamOptions),
+    });
   }
+
+  /** Key-free reference for one alias. Throws when the alias is unknown. */
+  account(alias: string): AccountReference {
+    const reference = (this.accounts as Record<string, AccountReference>)[alias];
+    if (!reference) throw new HiveAccountNotFoundError(alias);
+    return reference;
+  }
+
+  /** Every declared account alias. */
+  listAccounts(): string[] {
+    return this.resolver.list();
+  }
+
+  /** Safe alias resolution. Never returns key material. */
+  resolveAccount(alias: string): ResolvedAccount {
+    return this.resolver.resolve(alias);
+  }
+}
+
+function cloneDeep<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((item) => cloneDeep(item)) as unknown as T;
+  if (isPlainObject(value as unknown)) {
+    const copy: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      copy[key] = cloneDeep(item);
+    }
+    return copy as T;
+  }
+  return value;
+}
+
+function freezeDeep<T>(value: T): T {
+  if (value && typeof value === "object") {
+    Object.values(value as Record<string, unknown>).forEach(freezeDeep);
+    Object.freeze(value);
+  }
+  return value;
 }

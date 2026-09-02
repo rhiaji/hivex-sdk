@@ -14,9 +14,9 @@ import {
 } from "../issuer/nft/errors";
 import type {
   NftBurnInput,
-  NftMintInput,
-  NftMintInstance,
-  NftMintMultipleInput,
+  NftIssueInput,
+  NftIssueInstance,
+  NftIssueMultipleInput,
   NftTransferInput,
   NftTransferItem,
 } from "../issuer/nft/types";
@@ -80,8 +80,8 @@ function assertNftItems(value: unknown, field: string): asserts value is NftTran
 }
 
 function buildInstancePayload(
-  instance: NftMintInstance<Record<string, unknown>>,
-  fromType?: NftMintInstance["fromType"],
+  instance: NftIssueInstance<Record<string, unknown>>,
+  fromType?: NftIssueInstance["fromType"],
 ): Record<string, unknown> {
   assertNftSymbol(instance?.symbol);
   assertAccount(instance?.account, "account");
@@ -104,7 +104,7 @@ function buildInstancePayload(
 
 /**
  * Pure builder for Hive Engine NFT contract actions.
- * Shared by the backend signer flow and the Hive Keychain flow — it performs
+ * Shared by the backend signing flow and the Hive Keychain flow — it performs
  * no signing, no network access and holds no state.
  */
 export { DEFAULT_BURN_ACCOUNT };
@@ -112,10 +112,10 @@ export { DEFAULT_BURN_ACCOUNT };
 export class NftActionBuilder {
   /** `nft.issue` */
   buildIssue<TProperties extends Record<string, unknown> = Record<string, unknown>>(
-    input: Omit<NftMintInput<TProperties>, "from" | "mode" | "id">,
+    input: Omit<NftIssueInput<TProperties>, "from" | "mode" | "id">,
   ): HiveEngineContractAction {
     const payload = buildInstancePayload(
-      input as unknown as NftMintInstance<Record<string, unknown>>,
+      input as unknown as NftIssueInstance<Record<string, unknown>>,
       input.fromType,
     );
     return {
@@ -127,7 +127,7 @@ export class NftActionBuilder {
 
   /** `nft.issueMultiple` */
   buildIssueMultiple<TProperties extends Record<string, unknown> = Record<string, unknown>>(
-    input: Omit<NftMintMultipleInput<TProperties>, "from" | "mode" | "id">,
+    input: Omit<NftIssueMultipleInput<TProperties>, "from" | "mode" | "id">,
   ): HiveEngineContractAction {
     if (!Array.isArray(input?.instances) || input.instances.length === 0) {
       throw new NftValidationError(`"instances" must be a non-empty array`);
@@ -138,7 +138,7 @@ export class NftActionBuilder {
       );
     }
     const instances = input.instances.map((instance) =>
-      buildInstancePayload(instance as unknown as NftMintInstance<Record<string, unknown>>),
+      buildInstancePayload(instance as unknown as NftIssueInstance<Record<string, unknown>>),
     );
     return {
       contractName: NFT_CONTRACT,
@@ -189,6 +189,3 @@ export class NftActionBuilder {
     });
   }
 }
-
-/** Legacy name kept for backwards compatibility. */
-export { NftActionBuilder as NftTransactionBuilder };

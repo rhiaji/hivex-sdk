@@ -11,10 +11,8 @@ export {
 export type { NftContractActionName, TokenContractActionName } from "./constants";
 export type { HiveEngineContractAction } from "./types";
 export { DEFAULT_BURN_ACCOUNT, resolveBurnAccount } from "./burn";
-export { NftActionBuilder, NftTransactionBuilder, countNftInstances, assertNftSymbol } from "./NftActionBuilder";
-export {
-  TokenActionBuilder,
-  assertTokenQuantity,
-  assertTokenSymbol,
-} from "./TokenActionBuilder";
+export { NftOperationParser, nftOperationParser } from "./NftOperationParser";
+export type { NormalizedNftOperation, NftInstanceRef } from "./NftOperationParser";
+export { NftActionBuilder, countNftInstances, assertNftSymbol } from "./NftActionBuilder";
+export { TokenActionBuilder } from "./TokenActionBuilder";
 export type { TokenActionInput, TokenBurnActionInput } from "./TokenActionBuilder";

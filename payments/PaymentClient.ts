@@ -4,14 +4,13 @@ import { EnginePaymentClient } from "./engine/EnginePaymentClient";
 import { EnginePaymentValidator } from "./engine/EnginePaymentValidator";
 import { EngineRpcClient, type EngineRpcOptions } from "./engine/EngineRpcClient";
 import { HivePaymentClient } from "./hive/HivePaymentClient";
-import { PaymentParser } from "./PaymentParser";
+import { TransactionReader } from "../reader/TransactionReader";
 import { CustomJsonParser } from "../parser/CustomJsonParser";
 import { ReaderClient } from "../reader/ReaderClient";
 import { PaymentWatcher, type StreamEngineFactory } from "./PaymentWatcher";
 import { PaymentValidator } from "./PaymentValidator";
 import type {
   ParsedPayment,
-  PaymentParseInput,
   PaymentStreamOptions,
   PaymentValidateInput,
   PaymentValidationResult,
@@ -49,7 +48,7 @@ export class PaymentClient {
   /** Direct access to the Hive Engine sidechain RPC. */
   public readonly engineRpc: EngineRpcClient;
 
-  private readonly parser: PaymentParser;
+  private readonly reader: TransactionReader;
   private readonly validator: PaymentValidator;
   private readonly watcher: PaymentWatcher;
 
@@ -59,8 +58,8 @@ export class PaymentClient {
     this.engineRpc = new EngineRpcClient(options.engine ?? {});
 
     const engineValidator = options.engineValidator ?? new EnginePaymentValidator(this.engineRpc);
-    this.parser = new PaymentParser(options.rpc);
-    this.validator = new PaymentValidator(this.parser, engineValidator);
+    this.reader = new TransactionReader(options.rpc, new CustomJsonParser());
+    this.validator = new PaymentValidator(this.reader, engineValidator);
 
     const createStream =
       options.createStream ??
@@ -74,8 +73,8 @@ export class PaymentClient {
   }
 
   /** Every payment carried by a transaction, without execution checks. */
-  async parse<T = unknown>(input: PaymentParseInput): Promise<ParsedPayment<T>[]> {
-    return this.parser.parseTransaction<T>(input.transactionId);
+  async parse<T = unknown>(input: { transactionId: string }): Promise<ParsedPayment<T>[]> {
+    return this.validator.parse<T>(input.transactionId);
   }
 
   /**

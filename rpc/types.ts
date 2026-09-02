@@ -47,13 +47,6 @@ export interface HiveBlock {
   [key: string]: unknown;
 }
 
-/** A block enriched with its own number (blocks do not include it). */
-export interface NumberedBlock extends HiveBlock {
-  block_num: number;
-  /** Friendly alias of `block_num`. */
-  blockNumber: number;
-}
-
 export interface DynamicGlobalProperties {
   head_block_number: number;
   last_irreversible_block_num: number;

@@ -1,20 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
-import { HIVE_ENGINE_CUSTOM_JSON_ID } from "../../engine/index";
+import { HIVE_ENGINE_CUSTOM_JSON_ID, NftActionBuilder } from "../../engine/index";
 import { HiveSdkError } from "../../types/index";
 import { createAccountReference } from "../../configs/AccountReference";
 import type { IssuerContext } from "../IssuerDispatcher";
 import { NftIssuer } from "./NftIssuer";
 import { NftAccountResolutionError, NftValidationError } from "./errors";
 
-const ref = (alias: string) => createAccountReference("default", alias, {});
+const TEST_WIF = "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ";
+
+const ref = (alias: string) => createAccountReference(alias, {});
 
 function makeContext(overrides: Partial<IssuerContext> = {}): IssuerContext {
   return {
     rpc: { call: vi.fn() } as unknown as IssuerContext["rpc"],
     keychain: { customJsonRaw: vi.fn() } as unknown as IssuerContext["keychain"],
-    signer: { sign: vi.fn() } as unknown as IssuerContext["signer"],
-    configName: "default",
     builder: {} as IssuerContext["builder"],
+    resolveSigningAccount: (alias: string) => ({ alias, account: "issuer-account", key: TEST_WIF }),
     resolveAccount: (alias: string) => {
       if (alias !== "nftIssuer") {
         throw new HiveSdkError("ACCOUNT_ALIAS_NOT_FOUND", `Unknown alias "${alias}"`);
@@ -30,7 +31,7 @@ describe("NftIssuer offline builders", () => {
   it("resolves the alias and emits a Hive Engine custom_json operation", () => {
     const issuer = new NftIssuer(makeContext());
 
-    const preview = issuer.buildMint({
+    const preview = issuer.buildIssue({
       from: ref("nftIssuer"),
       symbol: "COLLECTION",
       account: "alice",
@@ -56,7 +57,6 @@ describe("NftIssuer offline builders", () => {
     const call = vi.fn();
     const issuer = new NftIssuer(
       makeContext({
-        signer: { sign } as unknown as IssuerContext["signer"],
         rpc: { call } as unknown as IssuerContext["rpc"],
       }),
     );
@@ -85,7 +85,7 @@ describe("NftIssuer offline builders", () => {
 
   it("previews issueMultiple actions", () => {
     const issuer = new NftIssuer(makeContext());
-    const preview = issuer.buildMintMultiple({
+    const preview = issuer.buildIssueMultiple({
       from: ref("nftIssuer"),
       instances: [
         { symbol: "COLLECTION", account: "alice", feeSymbol: "BEE" },
@@ -119,8 +119,7 @@ describe("NftIssuer offline builders", () => {
 });
 
 describe("NftIssuer signing path", () => {
-  it("signs with hive.signer and broadcasts through hive.rpc", async () => {
-    const sign = vi.fn().mockResolvedValue({ transaction: { signatures: ["sig"] } });
+  it("signs with the configured private key and broadcasts through hive.rpc", async () => {
     const call = vi.fn().mockImplementation((method: string) => {
       if (method === "condenser_api.get_dynamic_global_properties") {
         return Promise.resolve({ head_block_number: 100, head_block_id: "0000006400112233445566778899aabbccddeeff", time: "2026-01-01T00:00:00" });
@@ -133,28 +132,54 @@ describe("NftIssuer signing path", () => {
 
     const issuer = new NftIssuer(
       makeContext({
-        signer: { sign } as unknown as IssuerContext["signer"],
         rpc: { call } as unknown as IssuerContext["rpc"],
         resolveSigningAccount: (alias: string) => ({
           alias,
           account: "issuer-account",
-          key: "5Jprivatekey",
+          key: TEST_WIF,
         }),
       }),
     );
 
-    const result = await issuer.mint({
+    const result = await issuer.issue({
       from: ref("nftIssuer"),
       symbol: "COLLECTION",
       account: "alice",
       feeSymbol: "BEE",
     });
 
-    expect(sign).toHaveBeenCalledTimes(1);
     expect(result.transactionId).toBe("tx123");
     expect(result.action).toBe("issue");
     expect(
       call.mock.calls.some(([method]) => method === "condenser_api.broadcast_transaction_synchronous"),
     ).toBe(true);
+  });
+});
+
+describe("NftIssuer burn", () => {
+  it("burns to null by default and accepts a custom destination", () => {
+    const issuer = new NftIssuer(makeContext());
+
+    const preview = issuer.buildBurn({ from: ref("nftIssuer"), symbol: "CARD", id: "42" });
+    const action = JSON.parse(preview.json);
+    expect(action.contractAction).toBe("transfer");
+    expect(action.contractPayload.to).toBe("null");
+    expect(action.contractPayload.nfts).toEqual([{ symbol: "CARD", ids: ["42"] }]);
+    expect(preview.destination).toBe("null");
+
+    const custom = JSON.parse(
+      issuer.buildBurn({ from: ref("nftIssuer"), symbol: "CARD", id: ["1", "2"], account: "graveyard" })
+        .json,
+    );
+    expect(custom.contractPayload.to).toBe("graveyard");
+    expect(custom.contractPayload.nfts).toEqual([{ symbol: "CARD", ids: ["1", "2"] }]);
+  });
+
+  it("emits the same protocol payload as the Keychain path", () => {
+    const input = { symbol: "CARD", account: "alice", feeSymbol: "ENG" };
+    const backend = JSON.parse(
+      new NftIssuer(makeContext()).buildIssue({ from: ref("nftIssuer"), ...input }).json,
+    );
+    expect(backend).toEqual(new NftActionBuilder().buildIssue(input));
   });
 });

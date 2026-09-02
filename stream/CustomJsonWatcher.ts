@@ -43,23 +43,27 @@ export class CustomJsonWatcher {
     const { id, actions, onInvalidPayload, ...streamOptions } = options;
     const engine = this.createEngine(streamOptions);
 
-    return iterateEngine<CustomJsonEvent<T>>(engine, (push) => {
-      engine.customJson<T>({
-        id,
-        ...(actions && actions.length > 0 ? { actions } : {}),
-        handler: (event: CustomJsonStreamEvent<T>) => {
-          if (event.standardized && event.customJson) {
-            push(event.customJson);
-            return;
-          }
-          // A malformed payload must never kill the stream.
-          onInvalidPayload?.({
-            reason: "payload does not follow the standardized protocol",
-            blockNumber: event.blockNumber,
-            raw: event.raw,
-          });
-        },
-      });
-    });
+    return iterateEngine<CustomJsonEvent<T>>(
+      engine,
+      (push) => {
+        engine.customJson<T>({
+          id,
+          ...(actions && actions.length > 0 ? { actions } : {}),
+          handler: (event: CustomJsonStreamEvent<T>) => {
+            if (event.standardized && event.customJson) {
+              push(event.customJson);
+              return;
+            }
+            // A malformed payload must never kill the stream.
+            onInvalidPayload?.({
+              reason: "payload does not follow the standardized protocol",
+              blockNumber: event.blockNumber,
+              raw: event.raw,
+            });
+          },
+        });
+      },
+      options.signal,
+    );
   }
 }

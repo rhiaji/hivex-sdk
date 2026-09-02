@@ -11,7 +11,7 @@ export interface NftLockNfts {
 }
 
 /** `from` is an SDK account reference such as `game.accounts.minter`. */
-export interface NftMintInput<
+export interface NftIssueInput<
   TProperties extends Record<string, unknown> = Record<string, unknown>,
 > extends IssuerOperationOptions {
   from: AccountReference;
@@ -27,7 +27,7 @@ export interface NftMintInput<
 }
 
 /** One instance inside an `issueMultiple` operation. */
-export interface NftMintInstance<
+export interface NftIssueInstance<
   TProperties extends Record<string, unknown> = Record<string, unknown>,
 > {
   symbol: string;
@@ -40,11 +40,11 @@ export interface NftMintInstance<
   lockNfts?: NftLockNfts[];
 }
 
-export interface NftMintMultipleInput<
+export interface NftIssueMultipleInput<
   TProperties extends Record<string, unknown> = Record<string, unknown>,
 > extends IssuerOperationOptions {
   from: AccountReference;
-  instances: Array<NftMintInstance<TProperties>>;
+  instances: Array<NftIssueInstance<TProperties>>;
 }
 
 export interface NftTransferItem {

@@ -1,7 +1,8 @@
 import { HIVE_ENGINE_CUSTOM_JSON_ID, TOKEN_ACTIONS, TOKEN_CONTRACT } from "../../engine/constants";
-import { actionPayloadParser } from "../../protocol/index";
+import { readOperation } from "../../operations/detectOperation";
 import { safeJsonParse } from "../../utils/helpers";
 import { isPlainObject } from "../../utils/validation";
+import { triggerFromMemo } from "../trigger";
 import type { ParsedPayment } from "../types";
 
 export interface EngineOperationContext {
@@ -11,7 +12,7 @@ export interface EngineOperationContext {
 }
 
 /**
- * Reads Hive Engine token transfers out of `custom_json` operations.
+ * THE Hive Engine token transfer normalizer.
  * Never throws — anything that is not a sidechain token transfer is null.
  *
  * The parser can only report `success: null` (pending): Layer 1 inclusion says
@@ -22,10 +23,10 @@ export class EnginePaymentParser {
     operation: unknown,
     context: EngineOperationContext = {},
   ): ParsedPayment<T> | null {
-    const normalized = this.normalizeOperation(operation);
-    if (!normalized || normalized.type !== "custom_json") return null;
+    const detected = readOperation(operation);
+    if (!detected || detected.type !== "custom_json") return null;
 
-    const value = normalized.value;
+    const value = detected.value;
     if (value["id"] !== HIVE_ENGINE_CUSTOM_JSON_ID) return null;
 
     const sender = this.resolveSender(value);
@@ -39,7 +40,6 @@ export class EnginePaymentParser {
       const transfer = this.readTransfer(engineAction);
       if (!transfer) continue;
 
-      const trigger = actionPayloadParser.parse<T>(transfer.memo);
       return {
         network: "engine",
         transactionId: context.transactionId ?? null,
@@ -57,7 +57,7 @@ export class EnginePaymentParser {
           quantity: transfer.quantity,
           memo: transfer.memo,
         },
-        trigger,
+        trigger: triggerFromMemo<T>(transfer.memo),
         raw: operation,
       };
     }
@@ -83,6 +83,7 @@ export class EnginePaymentParser {
     return {
       to,
       symbol,
+      // Quantity stays a decimal string — never a JavaScript float.
       quantity: String(quantity),
       memo: typeof payload["memo"] === "string" ? payload["memo"] : null,
     };
@@ -93,23 +94,6 @@ export class EnginePaymentParser {
     if (Array.isArray(active) && typeof active[0] === "string") return active[0];
     const posting = value["required_posting_auths"];
     if (Array.isArray(posting) && typeof posting[0] === "string") return posting[0];
-    return null;
-  }
-
-  private normalizeOperation(
-    operation: unknown,
-  ): { type: string; value: Record<string, unknown> } | null {
-    if (Array.isArray(operation) && typeof operation[0] === "string") {
-      const value = operation[1];
-      return isPlainObject(value) ? { type: operation[0], value } : null;
-    }
-    if (isPlainObject(operation)) {
-      const type = operation["type"];
-      const value = operation["value"];
-      if (typeof type === "string" && isPlainObject(value)) {
-        return { type: type.replace(/_operation$/, ""), value };
-      }
-    }
     return null;
   }
 }

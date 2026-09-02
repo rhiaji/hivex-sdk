@@ -1,4 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { KeychainIssuer } from "./KeychainIssuer";
 import { KeychainClient } from "./KeychainClient";
 import { HIVE_ENGINE_CUSTOM_JSON_ID } from "../engine/index";
 import { HiveSdkError } from "../types/index";
@@ -36,8 +37,8 @@ describe("KeychainIssuer", () => {
   });
 
   it("broadcasts a tokens.issue contract action with active authority", async () => {
-    const client = new KeychainClient();
-    const result = await client.issuer.token.mint({
+    const client = new KeychainIssuer(new KeychainClient());
+    const result = await client.token.issue({
       username: "alice",
       symbol: "TOKEN",
       account: "bob",
@@ -58,8 +59,8 @@ describe("KeychainIssuer", () => {
   });
 
   it("includes the memo only when provided", async () => {
-    const client = new KeychainClient();
-    await client.issuer.token.transfer({
+    const client = new KeychainIssuer(new KeychainClient());
+    await client.token.transfer({
       username: "alice",
       symbol: "TOKEN",
       account: "bob",
@@ -71,9 +72,9 @@ describe("KeychainIssuer", () => {
   });
 
   it("rejects float quantities", async () => {
-    const client = new KeychainClient();
+    const client = new KeychainIssuer(new KeychainClient());
     await expect(
-      client.issuer.token.burn({
+      client.token.burn({
         username: "alice",
         symbol: "TOKEN",
         quantity: 10 as unknown as string,
@@ -83,22 +84,22 @@ describe("KeychainIssuer", () => {
   });
 
   it("requires a signing username", async () => {
-    const client = new KeychainClient();
+    const client = new KeychainIssuer(new KeychainClient());
     await expect(
-      client.issuer.token.mint({ username: "", symbol: "TOKEN", account: "bob", quantity: "1" }),
+      client.token.issue({ username: "", symbol: "TOKEN", account: "bob", quantity: "1" }),
     ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
   });
 
   it("broadcasts nft.issue and nft.transfer actions", async () => {
-    const client = new KeychainClient();
-    await client.issuer.nft.mint({
+    const client = new KeychainIssuer(new KeychainClient());
+    await client.nft.issue({
       username: "alice",
       symbol: "COLLECTION",
       account: "bob",
       feeSymbol: "BEE",
       properties: { level: 1 },
     });
-    await client.issuer.nft.transfer({
+    await client.nft.transfer({
       username: "alice",
       account: "bob",
       nfts: [{ symbol: "COLLECTION", ids: ["1", "2"] }],
@@ -122,9 +123,9 @@ describe("KeychainIssuer", () => {
   });
 
   it("enforces the issueMultiple instance limit before touching Keychain", async () => {
-    const client = new KeychainClient();
+    const client = new KeychainIssuer(new KeychainClient());
     await expect(
-      client.issuer.nft.mintMultiple({
+      client.nft.issueMultiple({
         username: "alice",
         instances: Array.from({ length: 11 }, () => ({
           symbol: "COLLECTION",
@@ -138,9 +139,9 @@ describe("KeychainIssuer", () => {
 
   it("maps a user cancellation to KEYCHAIN_REJECTED", async () => {
     installKeychain({ success: false, message: "Request was canceled by the user." });
-    const client = new KeychainClient();
+    const client = new KeychainIssuer(new KeychainClient());
     await expect(
-      client.issuer.token.mint({
+      client.token.issue({
         username: "alice",
         symbol: "TOKEN",
         account: "bob",
@@ -151,14 +152,55 @@ describe("KeychainIssuer", () => {
 
   it("throws KEYCHAIN_UNAVAILABLE without the extension", async () => {
     delete (globalThis as { window?: unknown }).window;
-    const client = new KeychainClient();
+    const client = new KeychainIssuer(new KeychainClient());
     await expect(
-      client.issuer.token.mint({
+      client.token.issue({
         username: "alice",
         symbol: "TOKEN",
         account: "bob",
         quantity: "1",
       }),
     ).rejects.toMatchObject({ code: "KEYCHAIN_UNAVAILABLE" });
+  });
+});
+
+describe("KeychainIssuer burn destinations", () => {
+  beforeEach(() => {
+    captured = [];
+    installKeychain();
+  });
+
+  afterEach(() => {
+    delete (globalThis as { window?: unknown }).window;
+    vi.restoreAllMocks();
+  });
+
+  it("burns tokens to null by default and to a custom account when given", async () => {
+    const client = new KeychainIssuer(new KeychainClient());
+
+    await client.token.burn({ username: "alice", symbol: "TOKEN", quantity: "5" });
+    expect(JSON.parse(captured[0]!.json).contractPayload.to).toBe("null");
+
+    await client.token.burn({
+      username: "alice",
+      symbol: "TOKEN",
+      quantity: "5",
+      account: "graveyard",
+    });
+    expect(JSON.parse(captured[1]!.json).contractPayload.to).toBe("graveyard");
+  });
+
+  it("burns NFTs to null by default and to a custom account when given", async () => {
+    const client = new KeychainIssuer(new KeychainClient());
+
+    const result = await client.nft.burn({ username: "alice", symbol: "CARD", id: "42" });
+    expect(result.transactionId).toBe("abc123");
+    expect(JSON.parse(captured[0]!.json).contractPayload).toEqual({
+      to: "null",
+      nfts: [{ symbol: "CARD", ids: ["42"] }],
+    });
+
+    await client.nft.burn({ username: "alice", symbol: "CARD", id: ["1"], account: "graveyard" });
+    expect(JSON.parse(captured[1]!.json).contractPayload.to).toBe("graveyard");
   });
 });

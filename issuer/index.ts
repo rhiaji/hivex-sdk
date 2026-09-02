@@ -8,5 +8,5 @@ export type {
   IssuerOperationPreview,
   IssuerOperationOptions,
 } from "./types";
-export type { TokenMintInput, TokenTransferInput, TokenBurnInput } from "./token/types";
-export type { NftMintInput, NftTransferInput, NftBurnInput } from "./nft/types";
+export type { TokenIssueInput, TokenTransferInput, TokenBurnInput } from "./token/types";
+export type { NftIssueInput, NftTransferInput, NftBurnInput } from "./nft/types";

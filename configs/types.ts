@@ -1,13 +1,15 @@
 /**
- * Configuration system types.
+ * Configuration types.
  *
- * A configuration is a named set of account aliases plus optional
- * application metadata. Configurations DO NOT control RPC nodes: RPC endpoint
- * discovery is a separate system (Beacon + default nodes + fallback).
+ * A configuration is whatever object the developer passes to `new HiveClient(...)`.
+ * The SDK stores it verbatim and exposes it as `hive.configs`. It does not
+ * interpret the structure, and it has no notion of environments, staging,
+ * production or active configuration contexts.
  *
- * Configurations never contain resolved private keys. They may reference an
- * environment variable name (`keyEnv`) which is resolved lazily, only when a
- * backend signing operation actually needs it.
+ * The single key the SDK does understand is the root-level `accounts` map,
+ * which declares key-free account aliases used by backend signing. Aliases may
+ * reference an environment variable name (`accountEnv` / `keyEnv`) that is
+ * resolved lazily, only when an operation actually needs it.
  */
 
 /**
@@ -30,14 +32,17 @@ export interface HiveAccountConfig {
   options?: Record<string, unknown>;
 }
 
-/** A named configuration. */
+/**
+ * Developer-owned configuration.
+ *
+ * Only `accounts` has meaning to the SDK; every other key is application data
+ * kept exactly as provided and reachable through `hive.configs`.
+ */
 export interface HiveConfig {
   /** Developer-defined account aliases. Keys are arbitrary. */
   accounts?: Record<string, HiveAccountConfig>;
-  /** Optional application metadata. Never affects blockchain behavior. */
-  metadata?: Record<string, unknown>;
-  /** Arbitrary developer-defined options; preserved verbatim by the SDK. */
-  options?: Record<string, unknown>;
+  /** Any other developer-defined structure. */
+  [key: string]: unknown;
 }
 
 /** Publicly resolved account alias. NEVER contains a private key. */
@@ -51,15 +56,3 @@ export interface ResolvedAccount {
 export interface ResolvedSigningAccount extends ResolvedAccount {
   key: string;
 }
-
-/** Safe, serializable description of a configuration (no secrets). */
-export interface HiveConfigSummary {
-  name: string;
-  accountAliases: string[];
-  /** Which aliases declare a signing key reference (never the key itself). */
-  signingAliases: string[];
-  metadata: Record<string, unknown>;
-  options: Record<string, unknown>;
-}
-
-export const DEFAULT_CONFIG_NAME = "default";

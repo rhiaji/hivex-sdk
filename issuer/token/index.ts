@@ -1,2 +1,2 @@
 export { TokenIssuer } from "./TokenIssuer";
-export type { TokenMintInput, TokenTransferInput, TokenBurnInput } from "./types";
+export type { TokenIssueInput, TokenTransferInput, TokenBurnInput } from "./types";

@@ -13,6 +13,7 @@ export interface QueueDrivenStream {
 export async function* iterateEngine<E>(
   engine: QueueDrivenStream,
   register: (push: (event: E) => void) => void,
+  signal?: AbortSignal,
 ): AsyncGenerator<E, void, void> {
   const queue: E[] = [];
   let notify: (() => void) | null = null;
@@ -39,18 +40,23 @@ export async function* iterateEngine<E>(
       wake();
     });
 
+  // An aborted watcher must resolve its pending wait, otherwise the iterator
+  // would stay parked forever and never reach its cleanup block.
+  signal?.addEventListener("abort", wake, { once: true });
+
   try {
     while (true) {
       while (queue.length > 0) {
         yield queue.shift() as E;
       }
       if (failure) throw failure;
-      if (finished) return;
+      if (finished || signal?.aborted) return;
       await new Promise<void>((resolve) => {
         notify = resolve;
       });
     }
   } finally {
+    signal?.removeEventListener("abort", wake);
     engine.stop();
     await loop;
   }

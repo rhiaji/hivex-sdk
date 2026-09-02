@@ -1,7 +1,7 @@
 import type { RpcClient } from "../rpc/RpcClient";
 import { HiveSdkError } from "../types/index";
 import { isPlainObject } from "../utils/validation";
-import type { UnsignedTransaction } from "../signer/types";
+import type { UnsignedTransaction } from "./types";
 
 /**
  * Assembles an unsigned Hive transaction envelope from live chain properties.

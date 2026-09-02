@@ -1,106 +1,81 @@
 import { IssuerDispatcher } from "../IssuerDispatcher";
-import { HiveSdkError } from "../../types/index";
-import { assertNonEmptyString } from "../../utils/validation";
+import { HIVE_ENGINE_CUSTOM_JSON_ID, TokenActionBuilder } from "../../engine/index";
 import type { IssuerOperationPreview, IssuerTransactionResult } from "../types";
-import { resolveBurnAccount } from "../../engine/index";
-import type { TokenBurnInput, TokenMintInput, TokenTransferInput } from "./types";
-
-/** Quantities must be decimal strings — never JavaScript floats. */
-function assertQuantity(value: unknown): asserts value is string {
-  if (typeof value !== "string" || !/^\d+(\.\d+)?$/.test(value.trim())) {
-    throw new HiveSdkError(
-      "VALIDATION_ERROR",
-      `"quantity" must be a decimal string such as "100" or "100.000"`,
-    );
-  }
-}
-
-function assertSymbol(value: unknown): asserts value is string {
-  if (typeof value !== "string" || !/^[A-Z0-9.]{1,32}$/.test(value.trim())) {
-    throw new HiveSdkError("VALIDATION_ERROR", `"symbol" must be an uppercase token symbol`);
-  }
-}
+import type { TokenBurnInput, TokenIssueInput, TokenTransferInput } from "./types";
 
 /**
- * Generic backend token operations. `from` is a configuration account alias;
- * `account` is always the destination blockchain account.
+ * Backend token operations on the Hive Engine `tokens` contract.
  *
- * Every method here signs with a resolved private key and broadcasts over RPC.
- * Use the matching `build*` method for an offline, key-free payload preview.
+ * `from` is a configuration account reference (the signing account resolved
+ * from configuration + environment); `account` is always the destination
+ * blockchain account. Payload construction and validation are delegated to the
+ * shared `TokenActionBuilder`, so this path and the Keychain path emit
+ * byte-identical contract actions. Only signing and broadcasting differ.
  */
 export class TokenIssuer extends IssuerDispatcher {
-  private mintInput(input: TokenMintInput) {
-    assertSymbol(input.symbol);
-    assertNonEmptyString(input.account, "account");
-    assertQuantity(input.quantity);
-    return {
-      from: input.from,
-      action: "token.mint",
-      account: input.account,
-      metadata: {
-        symbol: input.symbol,
-        account: input.account,
-        quantity: input.quantity,
-        ...(input.memo === undefined ? {} : { memo: input.memo }),
-      },
-      ...(input.id ? { id: input.id } : {}),
-    };
-  }
+  /** Pure, environment-independent protocol builder shared with Keychain. */
+  public readonly actions = new TokenActionBuilder();
 
-  private transferInput(input: TokenTransferInput) {
-    assertSymbol(input.symbol);
-    assertNonEmptyString(input.account, "account");
-    assertQuantity(input.quantity);
-    return {
+  /** Offline preview of an issue operation. No keys, no network. */
+  buildIssue(input: TokenIssueInput): IssuerOperationPreview {
+    return this.previewEngineAction({
       from: input.from,
-      action: "token.transfer",
+      engineAction: this.actions.buildIssue(input),
       account: input.account,
-      metadata: {
-        symbol: input.symbol,
-        account: input.account,
-        quantity: input.quantity,
-        ...(input.memo === undefined ? {} : { memo: input.memo }),
-      },
-      ...(input.id ? { id: input.id } : {}),
-    };
-  }
-
-  /** Burn is a transfer to the burn destination (defaults to `"null"`). */
-  private burnInput(input: TokenBurnInput) {
-    return this.transferInput({
-      from: input.from,
-      symbol: input.symbol,
-      account: resolveBurnAccount(input.account),
-      quantity: input.quantity,
-      ...(input.memo === undefined ? {} : { memo: input.memo }),
-      ...(input.id ? { id: input.id } : {}),
+      id: input.id ?? HIVE_ENGINE_CUSTOM_JSON_ID,
     });
-  }
-
-  /** Offline preview of a mint operation. No keys, no network. */
-  buildMint(input: TokenMintInput): IssuerOperationPreview {
-    return this.previewProtocolAction(this.mintInput(input));
   }
 
   /** Offline preview of a transfer operation. No keys, no network. */
   buildTransfer(input: TokenTransferInput): IssuerOperationPreview {
-    return this.previewProtocolAction(this.transferInput(input));
+    return this.previewEngineAction({
+      from: input.from,
+      engineAction: this.actions.buildTransfer(input),
+      account: input.account,
+      id: input.id ?? HIVE_ENGINE_CUSTOM_JSON_ID,
+    });
   }
 
   /** Offline preview of a burn operation. No keys, no network. */
   buildBurn(input: TokenBurnInput): IssuerOperationPreview {
-    return this.previewProtocolAction(this.burnInput(input));
+    const action = this.actions.buildBurn(input);
+    return this.previewEngineAction({
+      from: input.from,
+      engineAction: action,
+      account: action.contractPayload["to"] as string,
+      id: input.id ?? HIVE_ENGINE_CUSTOM_JSON_ID,
+    });
   }
 
-  async mint(input: TokenMintInput): Promise<IssuerTransactionResult> {
-    return this.dispatch(this.mintInput(input));
+  async issue(input: TokenIssueInput): Promise<IssuerTransactionResult> {
+    return this.dispatchEngineAction({
+      from: input.from,
+      engineAction: this.actions.buildIssue(input),
+      account: input.account,
+      id: input.id ?? HIVE_ENGINE_CUSTOM_JSON_ID,
+    });
   }
 
   async transfer(input: TokenTransferInput): Promise<IssuerTransactionResult> {
-    return this.dispatch(this.transferInput(input));
+    return this.dispatchEngineAction({
+      from: input.from,
+      engineAction: this.actions.buildTransfer(input),
+      account: input.account,
+      id: input.id ?? HIVE_ENGINE_CUSTOM_JSON_ID,
+    });
   }
 
+  /**
+   * Burn — a token transfer to the burn destination.
+   * Defaults to the Hive account `"null"`; pass `account` to override it.
+   */
   async burn(input: TokenBurnInput): Promise<IssuerTransactionResult> {
-    return this.dispatch(this.burnInput(input));
+    const action = this.actions.buildBurn(input);
+    return this.dispatchEngineAction({
+      from: input.from,
+      engineAction: action,
+      account: action.contractPayload["to"] as string,
+      id: input.id ?? HIVE_ENGINE_CUSTOM_JSON_ID,
+    });
   }
 }

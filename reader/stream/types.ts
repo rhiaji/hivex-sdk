@@ -7,7 +7,8 @@ export type StreamEventType = "custom_json" | "payment";
 
 /** Blockchain position shared by every normalized event. */
 export interface StreamEventPosition {
-  transactionId: string;
+  /** Transaction id, or null when the node omitted it. */
+  transactionId: string | null;
   blockNumber: number;
   blockTimestamp: string;
   transactionIndex: number;
@@ -100,8 +101,6 @@ export type StreamSubscription = (() => void) & { unsubscribe: () => void };
 
 /** Options for `hive.reader.stream()`. */
 export interface UnifiedStreamOptions extends BlockStreamOptions {
-  /** First block to read. Alias of `fromBlock`. Defaults to the head block. */
-  startBlock?: number;
   /**
    * How many times a pending Layer 2 execution is re-read before giving up.
    * The Hive Engine sidechain indexes a few seconds after the Hive block, so

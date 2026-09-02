@@ -1,11 +1,16 @@
 import type { CustomJsonParser } from "../../parser/CustomJsonParser";
 import { quantitiesEqual } from "../../payments/amount";
 import type {
+  EngineExecutionExpectation,
   EngineExecutionResult,
   EnginePaymentValidator,
 } from "../../payments/engine/EnginePaymentValidator";
-import type { HiveOperation, NumberedBlock } from "../../rpc/types";
+import { associateTrigger, type TriggerCandidate } from "../../payments/trigger";
+import type { HiveOperation } from "../../rpc/types";
 import type { BlockStreamer } from "../../stream/BlockStreamer";
+import type { NormalizedBlock } from "../../stream/normalizeBlock";
+import { sleep } from "../../utils/helpers";
+
 import { OperationParser } from "./OperationParser";
 import { FilterRegistry } from "./FilterRegistry";
 import type {
@@ -142,7 +147,7 @@ export class StreamEngine {
   }
 
   private async run(signal: AbortSignal): Promise<void> {
-    const fromBlock = this.options.startBlock ?? this.options.fromBlock;
+    const fromBlock = this.options.fromBlock;
     const blockOptions = {
       ...(fromBlock !== undefined ? { fromBlock } : {}),
       ...(this.options.pollIntervalMs !== undefined
@@ -163,64 +168,90 @@ export class StreamEngine {
     }
   }
 
-  private async processBlock(block: NumberedBlock): Promise<void> {
-    this.lastBlockNumber = block.block_num;
+  private async processBlock(block: NormalizedBlock): Promise<void> {
+    this.lastBlockNumber = block.blockNumber;
     // Layer 2 execution is read at most once per transaction, per block.
     const executions = new Map<string, EngineExecutionResult>();
 
-    const transactions = Array.isArray(block.transactions) ? block.transactions : [];
-    const transactionIds = Array.isArray(block.transaction_ids) ? block.transaction_ids : [];
-
-    for (let txIndex = 0; txIndex < transactions.length; txIndex += 1) {
-      const operations = transactions[txIndex]?.operations;
-      if (!Array.isArray(operations)) continue;
-
-      for (let opIndex = 0; opIndex < operations.length; opIndex += 1) {
-        const operation = operations[opIndex];
-        if (!operation) continue;
-
-        const position = {
-          transactionId: transactionIds[txIndex] ?? "",
-          blockNumber: block.block_num,
-          blockTimestamp: typeof block.timestamp === "string" ? block.timestamp : "",
-          transactionIndex: txIndex,
-          operationIndex: opIndex,
-        };
-
-        try {
-          await this.processOperation(operation, position, executions);
-        } catch (error) {
-          // A malformed transaction must never kill the stream.
-          this.options.onError?.(error, block.block_num);
-        }
+    // Deterministic blockchain order: transaction index, then operation index.
+    for (const transaction of block.transactions) {
+      try {
+        await this.processTransaction(block, transaction, executions);
+      } catch (error) {
+        // A malformed transaction must never kill the stream.
+        this.options.onError?.(error, block.blockNumber);
       }
     }
   }
 
-  private async processOperation(
-    operation: HiveOperation,
-    position: StreamEventPosition,
+  /**
+   * Processing is transaction-scoped: trigger association can only look at
+   * operations of the SAME transaction, so the whole transaction is parsed
+   * before anything is dispatched.
+   */
+  private async processTransaction(
+    block: NormalizedBlock,
+    transaction: NormalizedBlock["transactions"][number],
     executions: Map<string, EngineExecutionResult>,
   ): Promise<void> {
-    const customJson = this.parser.customJson(operation, position);
-    if (customJson) {
-      await this.dispatchCustomJson(customJson);
+    const customJsonEvents: CustomJsonStreamEvent[] = [];
+    const payments: PaymentStreamEvent[] = [];
+    const candidates: TriggerCandidate[] = [];
+
+    for (const { operation, operationIndex } of transaction.operations) {
+      const position: StreamEventPosition = {
+        transactionId: transaction.transactionId,
+        blockNumber: block.blockNumber,
+        blockTimestamp: block.timestamp,
+        transactionIndex: transaction.transactionIndex,
+        operationIndex,
+      };
+
+      try {
+        const customJson = this.parser.customJson(operation, position);
+        if (customJson) {
+          customJsonEvents.push(customJson);
+          if (customJson.standardized && customJson.action) {
+            candidates.push({
+              operationIndex,
+              account: customJson.account,
+              payload: { action: customJson.action, metadata: customJson.metadata ?? null },
+            });
+          }
+        }
+
+        const detected = this.parser.payment(operation, position);
+        if (detected) {
+          payments.push({
+            ...detected.payment,
+            type: "payment",
+            blockNumber: position.blockNumber,
+            blockTimestamp: position.blockTimestamp,
+            transactionIndex: position.transactionIndex,
+            operationIndex: position.operationIndex,
+            source: detected.source,
+          });
+        }
+      } catch (error) {
+        // One invalid operation is isolated: the rest of the transaction runs.
+        this.options.onError?.(error, block.blockNumber);
+      }
     }
 
-    const detected = this.parser.payment(operation, position);
-    if (detected) {
-      await this.dispatchPayment(
+    for (const event of customJsonEvents) {
+      await this.dispatchCustomJson(event);
+    }
+
+    for (const event of payments) {
+      const associated = associateTrigger(
         {
-          ...detected.payment,
-          type: "payment",
-          blockNumber: position.blockNumber,
-          blockTimestamp: position.blockTimestamp,
-          transactionIndex: position.transactionIndex,
-          operationIndex: position.operationIndex,
-          source: detected.source,
+          operationIndex: event.operationIndex,
+          from: event.transfer.from,
+          memoTrigger: event.trigger,
         },
-        executions,
+        candidates,
       );
+      await this.dispatchPayment({ ...event, trigger: associated.trigger }, executions);
     }
   }
 
@@ -267,6 +298,12 @@ export class StreamEngine {
       event.transactionId,
       executions,
       event.blockNumber,
+      {
+        from: event.transfer.from,
+        to: event.transfer.account,
+        symbol: event.transfer.symbol,
+        quantity: event.transfer.quantity,
+      },
     );
     if (!execution) return event;
     return {
@@ -286,9 +323,19 @@ export class StreamEngine {
     transactionId: string | null,
     executions: Map<string, EngineExecutionResult>,
     blockNumber: number,
+    expected: EngineExecutionExpectation,
   ): Promise<EngineExecutionResult | null> {
     if (!transactionId) return null;
-    const cached = executions.get(transactionId);
+    // Cache per transfer, not per transaction: one transaction can carry
+    // several transfers with different verdicts.
+    const cacheKey = [
+      transactionId,
+      expected.from,
+      expected.to,
+      expected.symbol,
+      expected.quantity,
+    ].join("|");
+    const cached = executions.get(cacheKey);
     if (cached) return cached;
 
     const attempts = Math.max(1, this.options.engineConfirmationAttempts ?? 6);
@@ -296,9 +343,11 @@ export class StreamEngine {
     let last: EngineExecutionResult | null = null;
 
     for (let attempt = 0; attempt < attempts; attempt += 1) {
-      if (attempt > 0 && delayMs > 0) await sleep(delayMs);
+      if (this.controller?.signal.aborted) return last;
+      if (attempt > 0 && delayMs > 0) await sleep(delayMs, this.controller?.signal);
+      if (this.controller?.signal.aborted) return last;
       try {
-        last = await this.deps.engineValidator.verify(transactionId);
+        last = await this.deps.engineValidator.verify(transactionId, expected);
       } catch (error) {
         this.options.onError?.(error, blockNumber);
         last = null;
@@ -306,7 +355,7 @@ export class StreamEngine {
       }
       // Only a resolved result is final — pending means "ask again".
       if (last.success !== null) {
-        executions.set(transactionId, last);
+        executions.set(cacheKey, last);
         return last;
       }
     }
@@ -379,6 +428,3 @@ function mergeSignals(a: AbortSignal, b: AbortSignal): AbortSignal {
   return controller.signal;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}

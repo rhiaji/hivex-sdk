@@ -1,13 +1,13 @@
-import type { NumberedBlock } from "../rpc/types";
 import type { BlockStreamer } from "./BlockStreamer";
+import type { NormalizedBlock } from "./normalizeBlock";
 import type { BlockStreamOptions } from "./types";
 
 /**
- * `hive.blocks` — the core blockchain reading foundation.
+ * `hive.blocks` — the public face of the canonical block engine.
  *
- * Every other watcher (Custom JSON, payments) and the unified stream engine
- * read blocks through this single block stream. They never open their own
- * RPC polling loop.
+ * `watch()` is the primary block watching API. Every other watcher (Custom
+ * JSON, payments) and the unified reader stream read blocks through the same
+ * engine; they never open their own RPC polling loop.
  */
 export class BlockWatcher {
   private readonly streamer: BlockStreamer;
@@ -17,10 +17,12 @@ export class BlockWatcher {
   }
 
   /**
-   * Continuously read raw blocks as an async iterator. Without `fromBlock`
-   * watching starts at the current head block.
+   * Continuously read normalized blocks as an async iterator. Without
+   * `fromBlock` watching starts at the current head block; with `fromBlock`
+   * history is replayed and the stream continues into live blocks without a
+   * gap.
    */
-  watch(options: BlockStreamOptions = {}): AsyncGenerator<NumberedBlock, void, void> {
+  watch(options: BlockStreamOptions = {}): AsyncGenerator<NormalizedBlock, void, void> {
     return this.streamer.blocks(options);
   }
 }
