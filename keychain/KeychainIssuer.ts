@@ -2,8 +2,13 @@ import {
   HIVE_ENGINE_AUTHORITY,
   HIVE_ENGINE_CUSTOM_JSON_ID,
   NftActionBuilder,
+  NftCreationChecker,
   TokenActionBuilder,
+  TokenCreationChecker,
   type HiveEngineContractAction,
+  type TokenCreationCheck,
+  type NftCreationCheck,
+  type NftCreateActionInput,
 } from "../engine/index";
 import { HiveSdkError } from "../types/index";
 import type { KeychainClient } from "./KeychainClient";
@@ -14,7 +19,31 @@ import type {
   NftIssueMultipleInput,
   NftTransferInput,
 } from "../issuer/nft/types";
-import type { TokenActionInput, TokenBurnActionInput } from "../engine/TokenActionBuilder";
+import type {
+  TokenActionInput,
+  TokenBurnActionInput,
+  TokenCreateActionInput,
+} from "../engine/TokenActionBuilder";
+
+/** Keychain token creation input: the payload plus the signing account. */
+export type KeychainTokenCreateInput = TokenCreateActionInput &
+  KeychainIssuerOptions & {
+    /**
+     * Skips the BEE balance / existing symbol preflight. Off by default —
+     * creation fees are non-refundable, so the checks run first.
+     */
+    skipChecks?: boolean;
+  };
+
+/** Keychain NFT creation input: the payload plus the signing account. */
+export type KeychainNftCreateInput = NftCreateActionInput &
+  KeychainIssuerOptions & {
+    /**
+     * Skips the BEE balance / existing symbol preflight. Off by default —
+     * creation fees are non-refundable, so the checks run first.
+     */
+    skipChecks?: boolean;
+  };
 
 /** Every Keychain issuer operation is signed by this browser account. */
 export interface KeychainIssuerOptions {
@@ -81,6 +110,51 @@ export class KeychainTokenIssuer extends KeychainEngineIssuer {
   /** Pure builder, reusable for payload previews. */
   public readonly actions = new TokenActionBuilder();
 
+  /** Read-only Hive Engine preflight used by `create()`. */
+  public readonly creation: TokenCreationChecker;
+
+  constructor(client: KeychainClient, creation: TokenCreationChecker = new TokenCreationChecker()) {
+    super(client);
+    this.creation = creation;
+  }
+
+  /** Offline `tokens.create` payload preview. No network, no checks. */
+  buildCreate(input: TokenCreateActionInput): HiveEngineContractAction {
+    return this.actions.buildCreate(input);
+  }
+
+  /**
+   * Reports whether `username` can create `symbol`: BEE balance versus the
+   * sidechain creation fee, and whether the symbol is already taken.
+   */
+  async checkCreate(input: {
+    username: string;
+    symbol: string;
+  }): Promise<TokenCreationCheck> {
+    assertUsername(input?.username);
+    return this.creation.check({ account: input.username, symbol: input.symbol });
+  }
+
+  /**
+   * Create a new Hive Engine token through Keychain.
+   *
+   * The preflight runs first: the account must hold at least the creation fee
+   * in BEE and the symbol must not exist yet. Either failure throws before the
+   * Keychain popup opens (`INSUFFICIENT_BEE`, `TOKEN_ALREADY_EXISTS`).
+   */
+  async create(input: KeychainTokenCreateInput): Promise<KeychainResult> {
+    assertUsername(input?.username);
+    const action = this.buildCreate(input);
+    if (!input.skipChecks) {
+      await this.creation.assertCanCreate({ account: input.username, symbol: input.symbol });
+    }
+    return this.broadcast(action, {
+      username: input.username,
+      ...(input.id ? { id: input.id } : {}),
+      message: input.message ?? `Create token ${input.symbol}`,
+    });
+  }
+
   buildIssue(input: TokenActionInput): HiveEngineContractAction {
     return this.actions.buildIssue(input);
   }
@@ -119,6 +193,48 @@ export class KeychainTokenIssuer extends KeychainEngineIssuer {
 /** `hive.keychainIssuer.nft` — Hive Engine `nft` contract via Keychain. */
 export class KeychainNftIssuer extends KeychainEngineIssuer {
   public readonly actions = new NftActionBuilder();
+
+  /** Read-only Hive Engine preflight used by `create()`. */
+  public readonly creation: NftCreationChecker;
+
+  constructor(client: KeychainClient, creation: NftCreationChecker = new NftCreationChecker()) {
+    super(client);
+    this.creation = creation;
+  }
+
+  /** Offline `nft.create` payload preview. No network, no checks. */
+  buildCreate(input: NftCreateActionInput): HiveEngineContractAction {
+    return this.actions.buildCreate(input);
+  }
+
+  /**
+   * Reports whether `username` can create `symbol`: BEE balance versus the
+   * sidechain NFT creation fee, and whether the symbol is already taken.
+   */
+  async checkCreate(input: { username: string; symbol: string }): Promise<NftCreationCheck> {
+    assertUsername(input?.username);
+    return this.creation.check({ account: input.username, symbol: input.symbol });
+  }
+
+  /**
+   * Create a new Hive Engine NFT through Keychain.
+   *
+   * The preflight runs first: the account must hold at least the creation fee
+   * in BEE and the symbol must not exist yet. Either failure throws before the
+   * Keychain popup opens (`INSUFFICIENT_BEE`, `NFT_ALREADY_EXISTS`).
+   */
+  async create(input: KeychainNftCreateInput): Promise<KeychainResult> {
+    assertUsername(input?.username);
+    const action = this.buildCreate(input);
+    if (!input.skipChecks) {
+      await this.creation.assertCanCreate({ account: input.username, symbol: input.symbol });
+    }
+    return this.broadcast(action, {
+      username: input.username,
+      ...(input.id ? { id: input.id } : {}),
+      message: input.message ?? `Create NFT ${input.symbol}`,
+    });
+  }
 
   buildIssue<TProperties extends Record<string, unknown> = Record<string, unknown>>(
     input: EngineInput<NftIssueInput<TProperties>>,
@@ -175,8 +291,12 @@ export class KeychainIssuer {
   public readonly token: KeychainTokenIssuer;
   public readonly nft: KeychainNftIssuer;
 
-  constructor(client: KeychainClient) {
-    this.token = new KeychainTokenIssuer(client);
-    this.nft = new KeychainNftIssuer(client);
+  constructor(
+    client: KeychainClient,
+    creation?: TokenCreationChecker,
+    nftCreation?: NftCreationChecker,
+  ) {
+    this.token = new KeychainTokenIssuer(client, creation);
+    this.nft = new KeychainNftIssuer(client, nftCreation);
   }
 }

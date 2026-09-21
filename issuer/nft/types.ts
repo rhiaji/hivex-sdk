@@ -10,6 +10,27 @@ export interface NftLockNfts {
   ids: string[];
 }
 
+/** Creating an NFT costs BEE and the symbol must still be free. */
+export interface NftCreateInput extends IssuerOperationOptions {
+  from: AccountReference;
+  /** Display name, up to 50 letters, digits and spaces. */
+  name: string;
+  /** Uppercase letters only, up to 10 characters. */
+  symbol: string;
+  /** Company / organization. Optional. */
+  orgName?: string;
+  /** Product name. Optional. */
+  productName?: string;
+  /** Positive decimal string. Unlimited when omitted. */
+  maxSupply?: string;
+  /** Project website. Optional. */
+  website?: string;
+  authorizedIssuingAccounts?: string[];
+  authorizedIssuingContracts?: string[];
+  /** Skips the BEE balance / existing symbol preflight. Off by default. */
+  skipChecks?: boolean;
+}
+
 /** `from` is an SDK account reference such as `game.accounts.minter`. */
 export interface NftIssueInput<
   TProperties extends Record<string, unknown> = Record<string, unknown>,

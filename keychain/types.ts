@@ -18,6 +18,24 @@ export interface KeychainCustomJsonRawInput {
   message?: string;
 }
 
+export interface KeychainSignInInput {
+  username: string;
+  /** App-provided nonce or challenge text to sign. */
+  message: string;
+  /** Key used for the signature. Defaults to posting. */
+  authority?: HiveAuthority;
+}
+
+export interface KeychainSignInResult {
+  success: true;
+  username: string;
+  message: string;
+  authority: HiveAuthority;
+  signature: string | null;
+  signedAt: string;
+  raw: unknown;
+}
+
 export interface KeychainResult {
   success: true;
   transactionId: string | null;
@@ -75,6 +93,12 @@ export interface HiveKeychainApi {
     keyType: string,
     json: string,
     displayMessage: string,
+    callback: (response: KeychainResponse) => void,
+  ) => void;
+  requestSignBuffer?: (
+    account: string,
+    message: string,
+    keyType: string,
     callback: (response: KeychainResponse) => void,
   ) => void;
   requestHandshake?: (callback: () => void) => void;

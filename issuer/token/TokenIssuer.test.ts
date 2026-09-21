@@ -147,3 +147,133 @@ describe("TokenIssuer signing path", () => {
     expect(result.transactionId).toBe("tx999");
   });
 });
+
+describe("TokenIssuer token creation", () => {
+  const createBase = {
+    from: ref("treasury"),
+    symbol: "TOKEN",
+    name: "My Token",
+    precision: 3,
+    maxSupply: "1000000",
+  };
+
+  const checker = (overrides: Record<string, unknown> = {}) =>
+    ({
+      check: vi.fn().mockResolvedValue({
+        symbol: "TOKEN",
+        account: "treasury-account",
+        fee: "100",
+        balance: "250",
+        hasEnoughBee: true,
+        symbolExists: false,
+        existingToken: null,
+        ok: true,
+        issues: [],
+      }),
+      assertCanCreate: vi.fn().mockResolvedValue(undefined),
+      ...overrides,
+    }) as unknown as TokenIssuer["creation"];
+
+  it("builds a tokens.create payload identical to the Keychain path", () => {
+    const preview = new TokenIssuer(makeContext()).buildCreate({
+      ...createBase,
+      url: "https://example.com",
+    });
+
+    expect(preview.alias).toBe("treasury");
+    expect(preview.account).toBe("treasury-account");
+    expect(preview.id).toBe(HIVE_ENGINE_CUSTOM_JSON_ID);
+    expect(JSON.parse(preview.json)).toEqual(
+      new TokenActionBuilder().buildCreate({
+        symbol: "TOKEN",
+        name: "My Token",
+        precision: 3,
+        maxSupply: "1000000",
+        url: "https://example.com",
+      }),
+    );
+  });
+
+  it("validates symbol, name, precision and max supply", () => {
+    const issuer = new TokenIssuer(makeContext());
+    expect(() => issuer.buildCreate({ ...createBase, symbol: "token" })).toThrow(HiveSdkError);
+    expect(() => issuer.buildCreate({ ...createBase, name: "" })).toThrow(HiveSdkError);
+    expect(() => issuer.buildCreate({ ...createBase, precision: 9 })).toThrow(HiveSdkError);
+    expect(() => issuer.buildCreate({ ...createBase, maxSupply: "0" })).toThrow(HiveSdkError);
+  });
+
+  it("checks the resolved account, not the alias", async () => {
+    const issuer = new TokenIssuer(makeContext());
+    const creation = checker();
+    (issuer as unknown as { creation: unknown }).creation = creation;
+
+    const result = await issuer.checkCreate(createBase);
+    expect(result.ok).toBe(true);
+    expect((creation as unknown as { check: ReturnType<typeof vi.fn> }).check).toHaveBeenCalledWith({
+      account: "treasury-account",
+      symbol: "TOKEN",
+    });
+  });
+
+  it("runs the preflight before signing and broadcasting", async () => {
+    const call = vi.fn().mockImplementation((method: string) => {
+      if (method === "condenser_api.get_dynamic_global_properties") {
+        return Promise.resolve({
+          head_block_number: 100,
+          head_block_id: "0000006400112233445566778899aabbccddeeff",
+          time: "2026-01-01T00:00:00",
+        });
+      }
+      return Promise.resolve({ id: "txcreate" });
+    });
+    const issuer = new TokenIssuer(
+      makeContext({ rpc: { call } as unknown as IssuerContext["rpc"] }),
+    );
+    const assertCanCreate = vi.fn().mockResolvedValue(undefined);
+    (issuer as unknown as { creation: unknown }).creation = checker({ assertCanCreate });
+
+    const result = await issuer.create(createBase);
+    expect(assertCanCreate).toHaveBeenCalledWith({
+      account: "treasury-account",
+      symbol: "TOKEN",
+    });
+    expect(result.transactionId).toBe("txcreate");
+  });
+
+  it("never broadcasts when the preflight fails", async () => {
+    const call = vi.fn();
+    const issuer = new TokenIssuer(
+      makeContext({ rpc: { call } as unknown as IssuerContext["rpc"] }),
+    );
+    (issuer as unknown as { creation: unknown }).creation = checker({
+      assertCanCreate: vi
+        .fn()
+        .mockRejectedValue(new HiveSdkError("INSUFFICIENT_BEE", "not enough BEE")),
+    });
+
+    await expect(issuer.create(createBase)).rejects.toThrow(/not enough BEE/);
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("skips the preflight with skipChecks", async () => {
+    const call = vi.fn().mockImplementation((method: string) => {
+      if (method === "condenser_api.get_dynamic_global_properties") {
+        return Promise.resolve({
+          head_block_number: 100,
+          head_block_id: "0000006400112233445566778899aabbccddeeff",
+          time: "2026-01-01T00:00:00",
+        });
+      }
+      return Promise.resolve({ id: "txskip" });
+    });
+    const issuer = new TokenIssuer(
+      makeContext({ rpc: { call } as unknown as IssuerContext["rpc"] }),
+    );
+    const assertCanCreate = vi.fn();
+    (issuer as unknown as { creation: unknown }).creation = checker({ assertCanCreate });
+
+    const result = await issuer.create({ ...createBase, skipChecks: true });
+    expect(assertCanCreate).not.toHaveBeenCalled();
+    expect(result.transactionId).toBe("txskip");
+  });
+});

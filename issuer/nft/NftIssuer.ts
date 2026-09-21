@@ -5,8 +5,11 @@ import { IssuerDispatcher } from "../IssuerDispatcher";
 import type { IssuerOperationPreview } from "../types";
 import { NftAccountResolutionError, NftIssuanceError, NftBurnError, NftTransferError, NftValidationError } from "./errors";
 import { NftActionBuilder, countNftInstances } from "../../engine/NftActionBuilder";
+import { NftCreationChecker, type NftCreationCheck } from "../../engine/NftCreationChecker";
+import { requireAccountReference } from "../../configs/AccountReference";
 import type {
   NftBurnInput,
+  NftCreateInput,
   NftIssueInput,
   NftIssueMultipleInput,
   NftTransactionResult,
@@ -25,6 +28,47 @@ import type {
 export class NftIssuer extends IssuerDispatcher {
   /** Reusable Hive Engine NFT action builder (also usable by Keychain flows). */
   public readonly actions = new NftActionBuilder();
+
+  /** Read-only Hive Engine preflight used by `create()`. */
+  public readonly creation = new NftCreationChecker();
+
+  /** Offline preview of an NFT creation. No keys, no network. */
+  buildCreate(input: NftCreateInput): IssuerOperationPreview {
+    return this.previewNftAction({
+      from: input.from,
+      action: this.actions.buildCreate(input),
+      ...(input.id ? { id: input.id } : {}),
+    });
+  }
+
+  /** BEE balance and NFT symbol availability for the signing account. */
+  async checkCreate(input: NftCreateInput): Promise<NftCreationCheck> {
+    const reference = requireAccountReference(input.from);
+    const resolved = this.context.resolveAccount(reference.alias);
+    return this.creation.check({ account: resolved.account, symbol: input.symbol });
+  }
+
+  /**
+   * Create a new Hive Engine NFT.
+   *
+   * Same flow as token creation: the signing account must hold the creation fee
+   * in BEE and the symbol must not exist yet, then the action is signed and
+   * broadcast.
+   */
+  async create(input: NftCreateInput): Promise<NftTransactionResult> {
+    const action = this.actions.buildCreate(input);
+    if (!input.skipChecks) {
+      const reference = requireAccountReference(input.from);
+      const resolved = this.context.resolveAccount(reference.alias);
+      await this.creation.assertCanCreate({ account: resolved.account, symbol: input.symbol });
+    }
+    return this.executeNftTransaction({
+      from: input.from,
+      action,
+      ...(input.id ? { id: input.id } : {}),
+      errorFactory: (message, raw) => new NftIssuanceError(message, raw),
+    });
+  }
 
   /** Offline preview of an issue operation. No keys, no network. */
   buildIssue<TProperties extends Record<string, unknown> = Record<string, unknown>>(

@@ -3,6 +3,12 @@ import {
   NFT_CONTRACT,
   NFT_MAX_ISSUE_MULTIPLE_INSTANCES,
   NFT_MAX_TRANSFER_INSTANCES,
+  NFT_MAX_SUPPLY_LIMIT,
+  NFT_NAME_MAX_LENGTH,
+  NFT_ORG_NAME_MAX_LENGTH,
+  NFT_PRODUCT_NAME_MAX_LENGTH,
+  NFT_SYMBOL_MAX_LENGTH,
+  NFT_URL_MAX_LENGTH,
 } from "./constants";
 import type { HiveEngineContractAction } from "./types";
 import { DEFAULT_BURN_ACCOUNT, resolveBurnAccount } from "./burn";
@@ -20,6 +26,30 @@ import type {
   NftTransferInput,
   NftTransferItem,
 } from "../issuer/nft/types";
+
+/**
+ * `nft.create` input. Only `name` and `symbol` are required by the sidechain;
+ * everything else is optional and can be updated later in TribalDex.
+ */
+export interface NftCreateActionInput {
+  /** Display name, up to 50 letters, digits and spaces. */
+  name: string;
+  /** Uppercase letters only, up to 10 characters. */
+  symbol: string;
+  /** Company / organization, optional. */
+  orgName?: string;
+  /** Product name, optional. */
+  productName?: string;
+  /** Positive decimal string. Unlimited when omitted. */
+  maxSupply?: string;
+  /** Project website, optional. */
+  website?: string;
+  /** Hive accounts allowed to issue on behalf of the owner. */
+  authorizedIssuingAccounts?: string[];
+  /** Smart contracts allowed to issue on behalf of the owner. */
+  authorizedIssuingContracts?: string[];
+}
+
 
 /** Total number of NFT instances across every transfer item. */
 export function countNftInstances(nfts: NftTransferItem[]): number {
@@ -109,7 +139,106 @@ function buildInstancePayload(
  */
 export { DEFAULT_BURN_ACCOUNT };
 
+/**
+ * Symbols eligible for creation are stricter than symbols already on chain:
+ * the sidechain only accepts uppercase letters, 1 to 10 characters.
+ */
+export function assertCreatableNftSymbol(value: unknown, field = "symbol"): asserts value is string {
+  if (
+    typeof value !== "string" ||
+    !new RegExp(`^[A-Z]{1,${NFT_SYMBOL_MAX_LENGTH}}$`).test(value.trim())
+  ) {
+    throw new NftSymbolError(
+      `"${field}" must be ${NFT_SYMBOL_MAX_LENGTH} uppercase letters or fewer`,
+    );
+  }
+}
+
+function assertNftText(value: unknown, field: string, maxLength: number): asserts value is string {
+  if (
+    typeof value !== "string" ||
+    value.trim() === "" ||
+    value.length > maxLength ||
+    !/^[a-zA-Z0-9 ]+$/.test(value)
+  ) {
+    throw new NftValidationError(
+      `"${field}" must be 1 to ${maxLength} letters, digits or spaces`,
+    );
+  }
+}
+
+function assertNftMaxSupply(value: unknown): asserts value is string {
+  if (typeof value !== "string" || !/^\d+$/.test(value.trim())) {
+    throw new NftValidationError(`"maxSupply" must be a positive integer string`);
+  }
+  const supply = value.trim();
+  if (Number(supply) < 1 || Number(supply) > Number(NFT_MAX_SUPPLY_LIMIT)) {
+    throw new NftValidationError(`"maxSupply" must be between 1 and ${NFT_MAX_SUPPLY_LIMIT}`);
+  }
+}
+
+function assertNftWebsite(value: unknown): asserts value is string {
+  if (typeof value !== "string" || value.length > NFT_URL_MAX_LENGTH) {
+    throw new NftValidationError(
+      `"website" must be a string of at most ${NFT_URL_MAX_LENGTH} characters`,
+    );
+  }
+}
+
+function assertAuthorizedList(value: unknown, field: string): asserts value is string[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new NftValidationError(`"${field}" must be a non-empty array of names`);
+  }
+  for (const entry of value) {
+    if (typeof entry !== "string" || entry.trim() === "") {
+      throw new NftValidationError(`"${field}" entries must be non-empty strings`);
+    }
+  }
+}
+
 export class NftActionBuilder {
+  /**
+   * `nft.create` — the payload only. Affordability (BEE) and symbol
+   * availability are runtime facts, checked by `NftCreationChecker`.
+   */
+  buildCreate(input: NftCreateActionInput): HiveEngineContractAction {
+    assertNftText(input?.name, "name", NFT_NAME_MAX_LENGTH);
+    assertCreatableNftSymbol(input?.symbol);
+    if (input?.orgName !== undefined) {
+      assertNftText(input.orgName, "orgName", NFT_ORG_NAME_MAX_LENGTH);
+    }
+    if (input?.productName !== undefined) {
+      assertNftText(input.productName, "productName", NFT_PRODUCT_NAME_MAX_LENGTH);
+    }
+    if (input?.maxSupply !== undefined) assertNftMaxSupply(input.maxSupply);
+    if (input?.website !== undefined) assertNftWebsite(input.website);
+    if (input?.authorizedIssuingAccounts !== undefined) {
+      assertAuthorizedList(input.authorizedIssuingAccounts, "authorizedIssuingAccounts");
+    }
+    if (input?.authorizedIssuingContracts !== undefined) {
+      assertAuthorizedList(input.authorizedIssuingContracts, "authorizedIssuingContracts");
+    }
+
+    return {
+      contractName: NFT_CONTRACT,
+      contractAction: NFT_ACTIONS.create,
+      contractPayload: {
+        name: input.name,
+        symbol: input.symbol,
+        ...(input.orgName === undefined ? {} : { orgName: input.orgName }),
+        ...(input.productName === undefined ? {} : { productName: input.productName }),
+        ...(input.maxSupply === undefined ? {} : { maxSupply: input.maxSupply }),
+        ...(input.website === undefined ? {} : { website: input.website }),
+        ...(input.authorizedIssuingAccounts === undefined
+          ? {}
+          : { authorizedIssuingAccounts: [...input.authorizedIssuingAccounts] }),
+        ...(input.authorizedIssuingContracts === undefined
+          ? {}
+          : { authorizedIssuingContracts: [...input.authorizedIssuingContracts] }),
+      },
+    };
+  }
+
   /** `nft.issue` */
   buildIssue<TProperties extends Record<string, unknown> = Record<string, unknown>>(
     input: Omit<NftIssueInput<TProperties>, "from" | "mode" | "id">,

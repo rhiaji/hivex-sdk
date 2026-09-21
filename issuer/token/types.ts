@@ -1,6 +1,22 @@
 import type { AccountReference } from "../../configs/AccountReference";
 import type { IssuerOperationOptions } from "../types";
 
+/** Creating a token costs BEE and the symbol must still be free. */
+export interface TokenCreateInput extends IssuerOperationOptions {
+  from: AccountReference;
+  /** Uppercase letters only, up to 10 characters. */
+  symbol: string;
+  /** Display name, up to 50 letters, digits and spaces. */
+  name: string;
+  /** Decimal places, 0 to 8. */
+  precision: number;
+  /** Positive decimal string. */
+  maxSupply: string;
+  url?: string;
+  /** Skips the BEE balance / existing symbol preflight. Off by default. */
+  skipChecks?: boolean;
+}
+
 /** `from` is an SDK account reference such as `hive.accounts.treasury`. */
 export interface TokenIssueInput extends IssuerOperationOptions {
   from: AccountReference;

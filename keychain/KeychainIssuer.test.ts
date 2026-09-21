@@ -1,7 +1,8 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { KeychainIssuer } from "./KeychainIssuer";
 import { KeychainClient } from "./KeychainClient";
-import { HIVE_ENGINE_CUSTOM_JSON_ID } from "../engine/index";
+import { HIVE_ENGINE_CUSTOM_JSON_ID, TokenCreationChecker } from "../engine/index";
+import type { EngineRpcClient } from "../payments/engine/EngineRpcClient";
 import { HiveSdkError } from "../types/index";
 import type { HiveKeychainApi, KeychainResponse } from "./types";
 
@@ -202,5 +203,88 @@ describe("KeychainIssuer burn destinations", () => {
 
     await client.nft.burn({ username: "alice", symbol: "CARD", id: ["1"], account: "graveyard" });
     expect(JSON.parse(captured[1]!.json).contractPayload.to).toBe("graveyard");
+  });
+});
+
+function makeChecker(rows: { balance?: string; token?: unknown }): TokenCreationChecker {
+  const findOne = vi.fn(async (params: Record<string, unknown>) => {
+    if (params["table"] === "params") return { tokenCreationFee: "100" };
+    if (params["table"] === "balances") {
+      return rows.balance === undefined ? null : { balance: rows.balance };
+    }
+    return rows.token ?? null;
+  });
+  return new TokenCreationChecker({ findOne } as unknown as EngineRpcClient);
+}
+
+describe("KeychainIssuer token creation", () => {
+  beforeEach(() => {
+    captured = [];
+    installKeychain();
+  });
+
+  afterEach(() => {
+    delete (globalThis as { window?: unknown }).window;
+    vi.restoreAllMocks();
+  });
+
+  const input = {
+    username: "rhiaji",
+    symbol: "SCRAP",
+    name: "Scrap Token",
+    precision: 3,
+    maxSupply: "1000000",
+  };
+
+  it("broadcasts tokens.create once the checks pass", async () => {
+    const client = new KeychainIssuer(new KeychainClient(), makeChecker({ balance: "250" }));
+    const result = await client.token.create({ ...input, url: "https://scrap.gg" });
+
+    expect(result.transactionId).toBe("abc123");
+    expect(captured[0]!.keyType).toBe("Active");
+    expect(captured[0]!.message).toContain("SCRAP");
+    expect(JSON.parse(captured[0]!.json)).toEqual({
+      contractName: "tokens",
+      contractAction: "create",
+      contractPayload: {
+        symbol: "SCRAP",
+        name: "Scrap Token",
+        precision: 3,
+        maxSupply: "1000000",
+        url: "https://scrap.gg",
+      },
+    });
+  });
+
+  it("never opens Keychain when the BEE balance is too low", async () => {
+    const client = new KeychainIssuer(new KeychainClient(), makeChecker({ balance: "8.45434186" }));
+    await expect(client.token.create(input)).rejects.toThrow(HiveSdkError);
+    expect(captured).toHaveLength(0);
+  });
+
+  it("never opens Keychain when the symbol already exists", async () => {
+    const client = new KeychainIssuer(
+      new KeychainClient(),
+      makeChecker({ balance: "500", token: { symbol: "SCRAP" } }),
+    );
+    await client.token
+      .create(input)
+      .catch((error: HiveSdkError) => expect(error.code).toBe("TOKEN_ALREADY_EXISTS"));
+    expect(captured).toHaveLength(0);
+  });
+
+  it("reports the checks without broadcasting", async () => {
+    const client = new KeychainIssuer(new KeychainClient(), makeChecker({ balance: "8.45434186" }));
+    const check = await client.token.checkCreate({ username: "rhiaji", symbol: "SCRAP" });
+
+    expect(check).toMatchObject({ fee: "100", balance: "8.45434186", ok: false });
+    expect(captured).toHaveLength(0);
+  });
+
+  it("can skip the checks explicitly", async () => {
+    const client = new KeychainIssuer(new KeychainClient(), makeChecker({ balance: "0" }));
+    const result = await client.token.create({ ...input, skipChecks: true });
+    expect(result.transactionId).toBe("abc123");
+    expect(captured).toHaveLength(1);
   });
 });

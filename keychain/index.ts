@@ -5,12 +5,14 @@ export {
   KeychainTokenIssuer,
   KeychainNftIssuer,
 } from "./KeychainIssuer";
-export type { KeychainIssuerOptions } from "./KeychainIssuer";
+export type { KeychainIssuerOptions, KeychainTokenCreateInput } from "./KeychainIssuer";
 export type {
   KeychainCustomJsonInput,
   KeychainCustomJsonRawInput,
   KeychainResult,
   KeychainResponse,
+  KeychainSignInInput,
+  KeychainSignInResult,
 } from "./types";
 export {
   KeychainPayments,

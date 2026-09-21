@@ -1,6 +1,6 @@
 import { CustomJsonBuilder } from "../transaction/CustomJsonBuilder";
 import { HiveSdkError } from "../types/index";
-import { isPlainObject } from "../utils/validation";
+import { assertNonEmptyString, isPlainObject } from "../utils/validation";
 import { KeychainPayments } from "./KeychainPayments";
 import type {
   HiveKeychainApi,
@@ -8,6 +8,8 @@ import type {
   KeychainCustomJsonRawInput,
   KeychainResponse,
   KeychainResult,
+  KeychainSignInInput,
+  KeychainSignInResult,
   KeychainTransferInput,
 } from "./types";
 
@@ -36,6 +38,55 @@ export class KeychainClient {
       throw new HiveSdkError("KEYCHAIN_UNAVAILABLE", "Hive Keychain is not installed");
     }
     return window.hive_keychain;
+  }
+
+  /**
+   * Request a Hive Keychain sign-in signature for an app-provided challenge.
+   * The returned signature can be verified by the app to prove account ownership.
+   */
+  async requestSignIn(input: KeychainSignInInput): Promise<KeychainSignInResult> {
+    const keychain = this.getKeychain();
+    if (typeof keychain.requestSignBuffer !== "function") {
+      throw new HiveSdkError(
+        "KEYCHAIN_UNAVAILABLE",
+        "This Hive Keychain version does not support sign-in requests",
+      );
+    }
+    const requestSignBuffer = keychain.requestSignBuffer.bind(keychain);
+
+    assertNonEmptyString(input.username, "username");
+    assertNonEmptyString(input.message, "message");
+    const authority = input.authority ?? "posting";
+    if (authority !== "posting" && authority !== "active") {
+      throw new HiveSdkError("VALIDATION_ERROR", `"authority" must be "posting" or "active"`);
+    }
+    const keyType = authority === "active" ? "Active" : "Posting";
+
+    const response = await new Promise<KeychainResponse>((resolve, reject) => {
+      try {
+        requestSignBuffer(input.username, input.message, keyType, (res) => resolve(res));
+      } catch (error) {
+        reject(
+          new HiveSdkError(
+            "KEYCHAIN_ERROR",
+            `Keychain sign-in failed: ${(error as Error).message}`,
+            error,
+          ),
+        );
+      }
+    });
+
+    assertKeychainSuccess(response, "Keychain sign-in failed", "Sign-in request rejected by user");
+
+    return {
+      success: true,
+      username: input.username,
+      message: input.message,
+      authority,
+      signature: extractSignature(response),
+      signedAt: new Date().toISOString(),
+      raw: response,
+    };
   }
 
   /**
@@ -78,18 +129,7 @@ export class KeychainClient {
       }
     });
 
-    if (!response || response.success !== true) {
-      const message =
-        typeof response?.message === "string" && response.message.trim() !== ""
-          ? response.message
-          : "Keychain transaction failed";
-      const rejected = /cancel|reject|declin/i.test(message);
-      throw new HiveSdkError(
-        rejected ? "KEYCHAIN_REJECTED" : "KEYCHAIN_ERROR",
-        rejected ? "Transaction rejected by user" : message,
-        response,
-      );
-    }
+    assertKeychainSuccess(response, "Keychain transaction failed", "Transaction rejected by user");
 
     return {
       success: true,
@@ -130,18 +170,7 @@ export class KeychainClient {
       }
     });
 
-    if (!response || response.success !== true) {
-      const message =
-        typeof response?.message === "string" && response.message.trim() !== ""
-          ? response.message
-          : "Keychain transaction failed";
-      const rejected = /cancel|reject|declin/i.test(message);
-      throw new HiveSdkError(
-        rejected ? "KEYCHAIN_REJECTED" : "KEYCHAIN_ERROR",
-        rejected ? "Transaction rejected by user" : message,
-        response,
-      );
-    }
+    assertKeychainSuccess(response, "Keychain transaction failed", "Transaction rejected by user");
 
     return {
       success: true,
@@ -163,23 +192,20 @@ export class KeychainClient {
     const currency = input.currency.trim().toUpperCase();
     const isNative = currency === "HIVE" || currency === "HBD";
 
-    if (isNative && typeof keychain.requestTransfer !== "function") {
-      throw new HiveSdkError(
-        "KEYCHAIN_UNAVAILABLE",
-        "This Hive Keychain version does not support transfer requests",
-      );
-    }
-    if (!isNative && typeof keychain.requestSendToken !== "function") {
-      throw new HiveSdkError(
-        "KEYCHAIN_UNAVAILABLE",
-        "This Hive Keychain version does not support Hive Engine token transfers",
-      );
-    }
-
     const response = await new Promise<KeychainResponse>((resolve, reject) => {
       try {
         if (isNative) {
-          keychain.requestTransfer!(
+          if (typeof keychain.requestTransfer !== "function") {
+            reject(
+              new HiveSdkError(
+                "KEYCHAIN_UNAVAILABLE",
+                "This Hive Keychain version does not support transfer requests",
+              ),
+            );
+            return;
+          }
+          const requestTransfer = keychain.requestTransfer.bind(keychain);
+          requestTransfer(
             input.username,
             input.to,
             input.amount,
@@ -189,7 +215,17 @@ export class KeychainClient {
             input.enforce ?? true,
           );
         } else {
-          keychain.requestSendToken!(
+          if (typeof keychain.requestSendToken !== "function") {
+            reject(
+              new HiveSdkError(
+                "KEYCHAIN_UNAVAILABLE",
+                "This Hive Keychain version does not support Hive Engine token transfers",
+              ),
+            );
+            return;
+          }
+          const requestSendToken = keychain.requestSendToken.bind(keychain);
+          requestSendToken(
             input.username,
             input.to,
             input.amount,
@@ -209,18 +245,7 @@ export class KeychainClient {
       }
     });
 
-    if (!response || response.success !== true) {
-      const message =
-        typeof response?.message === "string" && response.message.trim() !== ""
-          ? response.message
-          : "Keychain transfer failed";
-      const rejected = /cancel|reject|declin/i.test(message);
-      throw new HiveSdkError(
-        rejected ? "KEYCHAIN_REJECTED" : "KEYCHAIN_ERROR",
-        rejected ? "Transaction rejected by user" : message,
-        response,
-      );
-    }
+    assertKeychainSuccess(response, "Keychain transfer failed", "Transaction rejected by user");
 
     return {
       success: true,
@@ -230,12 +255,43 @@ export class KeychainClient {
   }
 }
 
+function assertKeychainSuccess(
+  response: KeychainResponse | undefined,
+  fallbackMessage: string,
+  rejectedMessage: string,
+): asserts response is KeychainResponse {
+  if (!response || response.success !== true) {
+    const message =
+      typeof response?.message === "string" && response.message.trim() !== ""
+        ? response.message
+        : fallbackMessage;
+    const rejected = /cancel|reject|declin/i.test(message);
+    throw new HiveSdkError(
+      rejected ? "KEYCHAIN_REJECTED" : "KEYCHAIN_ERROR",
+      rejected ? rejectedMessage : message,
+      response,
+    );
+  }
+}
+
 function extractTransactionId(response: KeychainResponse): string | null {
   const candidates: unknown[] = [response.result, response.data];
   for (const candidate of candidates) {
     if (isPlainObject(candidate)) {
       const id = candidate["id"] ?? candidate["tx_id"] ?? candidate["trx_id"];
       if (typeof id === "string" && id.length > 0) return id;
+    }
+  }
+  return null;
+}
+
+function extractSignature(response: KeychainResponse): string | null {
+  const candidates: unknown[] = [response.result, response.data, response];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.length > 0) return candidate;
+    if (isPlainObject(candidate)) {
+      const signature = candidate["signature"] ?? candidate["sig"] ?? candidate["signed_message"];
+      if (typeof signature === "string" && signature.length > 0) return signature;
     }
   }
   return null;

@@ -163,13 +163,47 @@ export type {
 
 export { HIVE_ENGINE_CUSTOM_JSON_ID } from "./engine/index";
 export type { HiveEngineContractAction } from "./engine/index";
+export {
+  BEE_SYMBOL,
+  DEFAULT_TOKEN_CREATION_FEE,
+  TOKEN_NAME_MAX_LENGTH,
+  TOKEN_SYMBOL_MAX_LENGTH,
+  TOKEN_URL_MAX_LENGTH,
+  TOKEN_PRECISION_MAX,
+  TOKEN_MAX_SUPPLY_LIMIT,
+  TokenCreationChecker,
+  NftCreationChecker,
+  DEFAULT_NFT_CREATION_FEE,
+  NFT_NAME_MAX_LENGTH,
+  NFT_SYMBOL_MAX_LENGTH,
+  NFT_ORG_NAME_MAX_LENGTH,
+  NFT_PRODUCT_NAME_MAX_LENGTH,
+  NFT_URL_MAX_LENGTH,
+  NFT_MAX_SUPPLY_LIMIT,
+} from "./engine/index";
+export type {
+  TokenCreateActionInput,
+  TokenCreationCheck,
+  TokenCreationCheckInput,
+  EngineTokenRow,
+  NftCreateActionInput,
+  NftCreationCheck,
+  NftCreationCheckInput,
+  EngineNftRow,
+} from "./engine/index";
 export type {
   IssuerTransactionResult,
   IssuerOperationPreview,
   IssuerOperationOptions,
 } from "./issuer/types";
-export type { TokenIssueInput, TokenTransferInput, TokenBurnInput } from "./issuer/token/types";
 export type {
+  TokenCreateInput,
+  TokenIssueInput,
+  TokenTransferInput,
+  TokenBurnInput,
+} from "./issuer/token/types";
+export type {
+  NftCreateInput,
   NftAccountType,
   NftIssueInput,
   NftIssueInstance,
@@ -187,7 +221,11 @@ export {
 
 /* ── Frontend writing: Hive Keychain ──────────────────────────────────── */
 
-export type { KeychainIssuerOptions } from "./keychain/KeychainIssuer";
+export type {
+  KeychainIssuerOptions,
+  KeychainTokenCreateInput,
+  KeychainNftCreateInput,
+} from "./keychain/KeychainIssuer";
 export type {
   KeychainHivePaymentInput,
   KeychainEnginePaymentInput,
@@ -196,6 +234,8 @@ export type {
   KeychainTransferInput,
   KeychainCustomJsonInput,
   KeychainCustomJsonRawInput,
+  KeychainSignInInput,
+  KeychainSignInResult,
   KeychainResult,
   KeychainResponse,
 } from "./keychain/types";
