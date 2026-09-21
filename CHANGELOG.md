@@ -3,11 +3,7 @@
 All notable changes to `hivexph-sdk` are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
-## 1.1.3
-
-- change the wrong repo from package.json file to the proper repository. 
-
-## 1.1.2
+## 1.2.0
 
 ### Added
 

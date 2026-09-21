@@ -1,9 +1,9 @@
 {
   "name": "hivexph-sdk",
-  "version": "1.1.4",
+  "version": "1.2.0",
   "description": "TypeScript SDK for Hive Custom JSON: configuration, backend signing, Hive Keychain, Hive Engine token/NFT issuers, block streaming, payments and transaction reading.",
   "license": "MIT",
-  "homepage": "https://github.com/rhiaji/hivexph-sdk/tree/main/package-manager#readme",
+  "homepage": "https://hivexph-sdk-frontend.vercel.app/",
   "bugs": {
     "url": "https://github.com/rhiaji/hivexph-sdk/issues"
   },
@@ -58,7 +58,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/rhiaji/hivexph-sdk.git",
+    "url": "https://github.com/rhiaji/hivex-sdk.git",
     "directory": "package-manager"
   }
 }
