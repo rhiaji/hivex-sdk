@@ -1,6 +1,6 @@
 {
   "name": "hivexph-sdk",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "TypeScript SDK for Hive Custom JSON: configuration, backend signing, Hive Keychain, Hive Engine token/NFT issuers, block streaming, payments and transaction reading.",
   "license": "MIT",
   "homepage": "https://hivexph-sdk-frontend.vercel.app/",

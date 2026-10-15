@@ -106,8 +106,11 @@ function writeAsset(writer: ByteWriter, amount: string): void {
   writer.int64(BigInt(`${whole}${padded}`));
   writer.uint8(precision);
 
+  // This envelope uses legacy binary assets, whose identifiers predate Hive.
+  // Keep HIVE/HBD in public inputs and transaction JSON; translate only here.
+  const binarySymbol = symbol === "HIVE" ? "STEEM" : symbol === "HBD" ? "SBD" : symbol;
   const symbolBytes = new Uint8Array(7);
-  symbolBytes.set(new TextEncoder().encode(symbol));
+  symbolBytes.set(new TextEncoder().encode(binarySymbol));
   writer.bytes(symbolBytes);
 }
 

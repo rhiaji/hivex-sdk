@@ -3,6 +3,20 @@
 All notable changes to `hivexph-sdk` are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 1.2.1
+
+### Fixed
+
+- Corrected native HIVE/HBD transaction signing: legacy binary assets now encode
+  the internal identifiers `STEEM`/`SBD`. Previously the public symbols were
+  written into signing bytes, producing signatures rejected by Hive authority
+  verification. Amounts, precision, padding and byte order are preserved; VESTS
+  encoding is unchanged.
+- Public payment inputs and broadcast JSON continue using `HIVE`/`HBD`; the
+  direct transfer API, signer and chain ID are unchanged. No dependencies added.
+- Added literal binary fixtures, independently verified public native and Engine
+  payment signing tests, and a built-package smoke check with fully mocked RPC.
+
 ## 1.2.0
 
 ### Added
